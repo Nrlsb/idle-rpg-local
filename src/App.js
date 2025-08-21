@@ -105,7 +105,11 @@ const initialGameState = {
         damageBonus: { name: 'Fuerza Ancestral', level: 0, cost: 1, increase: 0.05, description: '+5% Daño por nivel' },
     },
     monsterAnimation: '',
-    lastDailyReward: null, // NUEVO: Para recompensa diaria
+    lastDailyReward: null,
+    settings: {
+        musicOn: true,
+        sfxOn: true,
+    },
 };
 
 // --- Componentes de la UI ---
@@ -444,7 +448,6 @@ const OfflineGainsModal = ({ gains, onClose }) => {
     );
 };
 
-// --- NUEVO MODAL: Recompensa Diaria ---
 const DailyRewardModal = ({ reward, onClose }) => (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
         <div className="bg-gray-800 p-8 rounded-lg shadow-2xl max-w-sm w-full text-center">
@@ -480,9 +483,70 @@ const FloatingText = ({ text, x, y, color, id }) => {
 export default function App() {
     const [gameState, setGameState] = useState(initialGameState);
     const [offlineGains, setOfflineGains] = useState(null);
-    const [dailyReward, setDailyReward] = useState(null); // NUEVO
+    const [dailyReward, setDailyReward] = useState(null);
     const [activeTab, setActiveTab] = useState('upgrades');
+    const [isAudioReady, setIsAudioReady] = useState(false);
 
+    const audioManager = useRef(null);
+
+    useEffect(() => {
+        if (!isAudioReady || typeof window.Tone === 'undefined') return;
+
+        if (!audioManager.current) {
+            const synths = {
+                attack: new window.Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 } }).toDestination(),
+                crit: new window.Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 } }).toDestination(),
+                levelUp: new window.Tone.PolySynth(window.Tone.Synth).toDestination(),
+                gold: new window.Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.05, sustain: 0, release: 0.1 } }).toDestination(),
+                skill: new window.Tone.Synth({ oscillator: { type: 'sawtooth' }, envelope: { attack: 0.1, decay: 0.3, sustain: 0.2, release: 0.3 } }).toDestination(),
+                craft: new window.Tone.MetalSynth({ frequency: 100, envelope: { attack: 0.01, decay: 0.2, release: 0.1 }, harmonicity: 3.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).toDestination(),
+            };
+
+            const musicLoop = new window.Tone.Loop(time => {
+                synths.attack.triggerAttackRelease("C2", "8n", time);
+                synths.attack.triggerAttackRelease("G2", "8n", time + 0.5);
+            }, "1n");
+            
+            audioManager.current = {
+                synths,
+                musicLoop,
+                playSound: (sound) => {
+                    if (!gameState.settings.sfxOn) return;
+                    try {
+                        switch(sound) {
+                            case 'attack': synths.attack.triggerAttackRelease('C4', '8n'); break;
+                            case 'crit': synths.crit.triggerAttackRelease('G4', '8n'); break;
+                            case 'levelUp': synths.levelUp.triggerAttackRelease(['C4', 'E4', 'G4', 'C5'], '8n'); break;
+                            case 'gold': synths.gold.triggerAttackRelease('C6', '16n'); break;
+                            case 'skill': synths.skill.triggerAttackRelease('A3', '4n'); break;
+                            case 'craft': synths.craft.triggerAttackRelease("C3", "8n", "+0.05"); break;
+                            default: break;
+                        }
+                    } catch (e) { console.error("Error playing sound:", e); }
+                },
+            };
+        }
+
+        if (gameState.settings.musicOn) {
+            window.Tone.Transport.start();
+            audioManager.current.musicLoop.start(0);
+        } else {
+            audioManager.current.musicLoop.stop(0);
+        }
+
+    }, [isAudioReady, gameState.settings.sfxOn, gameState.settings.musicOn]);
+
+    const handleStartGame = async () => {
+        if (typeof window.Tone !== 'undefined') {
+            await window.Tone.start();
+            setIsAudioReady(true);
+        } else {
+            // Fallback si Tone.js no carga
+            alert("La librería de audio no pudo cargar. El juego funcionará sin sonido.");
+            setIsAudioReady(true); // Permite que el juego inicie sin audio
+        }
+    };
+    
     const totalStats = useMemo(() => {
         const prestigeDamageBonus = 1 + (gameState.prestigeUpgrades.damageBonus.level * gameState.prestigeUpgrades.damageBonus.increase);
         const passiveDamageBonus = 1 + (gameState.passiveSkills.increasedDamage.level * gameState.passiveSkills.increasedDamage.increase);
@@ -625,13 +689,16 @@ export default function App() {
                 damageDealt *= 3;
                 addLogMessage(`¡GOLPE PODEROSO! Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-orange-500 font-bold');
                 createFloatingText(damageDealt.toFixed(0), 'orange');
+                 audioManager.current?.playSound('crit');
             } else if (isCrit) {
                 damageDealt = Math.round(damageDealt * prev.hero.critMultiplier);
                 addLogMessage(`¡GOLPE CRÍTICO! Héroe ataca por ${damageDealt} de daño.`, 'text-yellow-400');
                 createFloatingText(damageDealt, 'yellow');
+                 audioManager.current?.playSound('crit');
             } else {
                 addLogMessage(`Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-green-400');
                 createFloatingText(damageDealt.toFixed(0), 'white');
+                 audioManager.current?.playSound('attack');
             }
             
             const newStateWithAnimation = { ...prev, monsterAnimation: 'shake' };
@@ -679,6 +746,7 @@ export default function App() {
                 if (loot) {
                     newState.inventory = [...newState.inventory, loot];
                     addLogMessage(`¡Has encontrado ${loot.name}!`, ITEM_RARITIES[loot.rarity].color);
+                    audioManager.current?.playSound('gold');
                 }
 
                 newState.hero.gold += goldGained;
@@ -697,6 +765,7 @@ export default function App() {
                     newDamage += 5;
                     newSkillPoints++;
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newLevel}.`, 'text-blue-400 font-bold');
+                    audioManager.current?.playSound('levelUp');
                 }
                 
                 newState.hero = {
@@ -740,6 +809,7 @@ export default function App() {
                     return prev;
             }
             
+            audioManager.current?.playSound('skill');
             const cooldownReduction = 1 - (prev.passiveSkills.fasterCooldowns.level * prev.passiveSkills.fasterCooldowns.increase);
             const finalCooldown = Math.max(1, skill.cooldown * cooldownReduction);
 
@@ -793,6 +863,7 @@ export default function App() {
                 first = false;
             }
             addLogMessage(logMsg, 'text-gray-400');
+            audioManager.current?.playSound('craft');
 
             return { ...prev, inventory: newInventory, hero: { ...prev.hero, materials: newMaterials }};
         });
@@ -811,6 +882,7 @@ export default function App() {
             const newHero = { ...prev.hero, gold: prev.hero.gold + finalValue };
             
             addLogMessage(`Vendido ${itemToSell.name} por ${finalValue} oro.`, 'text-yellow-300');
+            audioManager.current?.playSound('gold');
 
             return { ...prev, inventory: newInventory, hero: newHero };
         });
@@ -854,6 +926,7 @@ export default function App() {
             const newEquipment = { ...prev.hero.equipment, [slot]: upgradedItem };
 
             addLogMessage(`¡${item.name} mejorado a +${upgradedItem.upgradeLevel}!`, 'text-orange-400');
+            audioManager.current?.playSound('craft');
 
             return { ...prev, hero: { ...newHero, equipment: newEquipment }};
         });
@@ -938,7 +1011,6 @@ export default function App() {
         });
     }, []);
 
-    // NUEVO: Función para reclamar la recompensa diaria
     const handleClaimDailyReward = useCallback(() => {
         if (!dailyReward) return;
         setGameState(prev => {
@@ -1035,14 +1107,13 @@ export default function App() {
                 prestigeUpgrades: { ...initialGameState.prestigeUpgrades, ...loadedState.prestigeUpgrades },
                 passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills },
                 pets: { ...initialGameState.pets, ...loadedState.pets },
+                settings: { ...initialGameState.settings, ...loadedState.settings },
             };
 
-            // Lógica de Recompensa Diaria
             const today = new Date().toISOString().split('T')[0];
             if (loadedState.lastDailyReward !== today) {
                 setDailyReward({ gold: 500, scrap: 10, essence: 2 });
             }
-
 
             if (lastSaveTime) {
                 const currentTime = Date.now();
@@ -1148,13 +1219,26 @@ export default function App() {
     const activePet = PETS[gameState.pets.activePetId];
     const petLevel = gameState.pets.levels[gameState.pets.activePetId];
 
+    if (!isAudioReady) {
+        return (
+            <div className="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+                 <script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
+                <div className="text-center">
+                    <h1 className="text-4xl font-bold mb-8">Aventura Idle con React</h1>
+                    <button onClick={handleStartGame} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-lg text-2xl animate-pulse">
+                        Comenzar Aventura
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="bg-gray-900 text-white flex items-center justify-center min-h-screen font-sans">
             <style>{animations}</style>
 
             {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={() => setOfflineGains(null)} />}
             {dailyReward && <DailyRewardModal reward={dailyReward} onClose={handleClaimDailyReward} />}
-
 
             {gameState.floatingTexts.map(ft => (
                 <FloatingText key={ft.id} {...ft} />
@@ -1166,6 +1250,7 @@ export default function App() {
                     {/* Columna Izquierda */}
                     <div className="flex flex-col gap-6">
                        <HeroPanel hero={{...gameState.hero, petLevel}} stats={totalStats} prestige={gameState.prestige} activePet={activePet} />
+                       <SettingsPanel settings={gameState.settings} onToggleMusic={handleToggleMusic} onToggleSfx={handleToggleSfx} />
                        <PetPanel pets={gameState.pets} gold={gameState.hero.gold} onActivate={handleActivatePet} onLevelUp={handleLevelUpPet} />
                        <SkillsPanel skills={gameState.skills} onUseSkill={useSkill} />
                     </div>
