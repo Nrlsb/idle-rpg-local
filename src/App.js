@@ -24,7 +24,7 @@ const initialHeroState = {
     gold: 0,
     xp: 0,
     xpNeeded: 100,
-    skillPoints: 0, // NUEVO: Puntos de habilidad
+    skillPoints: 0,
     equipment: {
         weapon: null,
         shield: null,
@@ -53,7 +53,6 @@ const initialGameState = {
         quickHeal: { name: 'Curación Rápida', cooldown: 30, remaining: 0, description: 'Cura 25% de la vida máxima.' },
         goldRush: { name: 'Lluvia de Oro', cooldown: 60, remaining: 0, description: 'Duplica el oro del próximo monstruo.' },
     },
-    // NUEVO: Habilidades pasivas
     passiveSkills: {
         increasedDamage: { name: 'Fuerza Bruta', level: 0, cost: 1, increase: 0.02, description: '+2% Daño por nivel' },
         increasedHealth: { name: 'Vitalidad', level: 0, cost: 1, increase: 0.03, description: '+3% Vida Máxima por nivel' },
@@ -80,7 +79,8 @@ const initialGameState = {
     prestigeUpgrades: {
         goldBonus: { name: 'Bendición Dorada', level: 0, cost: 1, increase: 0.1, description: '+10% Oro por nivel' },
         damageBonus: { name: 'Fuerza Ancestral', level: 0, cost: 1, increase: 0.05, description: '+5% Daño por nivel' },
-    }
+    },
+    monsterAnimation: '', // NUEVO: Estado para animación del monstruo
 };
 
 // --- Componentes de la UI ---
@@ -110,7 +110,7 @@ const HeroPanel = ({ hero, stats, prestige }) => {
     );
 };
 
-const CombatPanel = ({ monster, stage, combatLog, isBossFight, bossTimer }) => {
+const CombatPanel = ({ monster, stage, combatLog, isBossFight, bossTimer, monsterAnimation }) => {
     const hpPercentage = (monster.hp / monster.maxHp) * 100;
     const logRef = useRef(null);
 
@@ -124,7 +124,8 @@ const CombatPanel = ({ monster, stage, combatLog, isBossFight, bossTimer }) => {
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col items-center justify-between h-full">
             <div>
                 <h2 className={`text-2xl font-bold text-center ${isBossFight ? 'text-yellow-400 animate-pulse' : 'text-red-400'}`}>{monster.name}</h2>
-                <div id="monster-art-container" className={`text-6xl text-center my-4 relative ${isBossFight ? 'transform scale-125' : ''}`}>{monster.art}</div>
+                {/* NUEVO: Se aplica la clase de animación */}
+                <div id="monster-art-container" className={`text-6xl text-center my-4 relative ${isBossFight ? 'transform scale-125' : ''} ${monsterAnimation}`}>{monster.art}</div>
                 <div className="relative">
                     <div className="w-full bg-gray-700 rounded-full h-6">
                         <div className={`${isBossFight ? 'bg-yellow-500' : 'bg-red-600'} h-6 rounded-full transition-all duration-300`} style={{ width: `${hpPercentage}%` }}></div>
@@ -196,7 +197,6 @@ const SkillButton = ({ skill, onClick }) => {
             <span className="relative z-10">
                 {skill.name}
                 <br />
-                {/* CORRECCIÓN: Se comprueba si skill.remaining es un número antes de llamar a toFixed */}
                 <span className="text-sm font-normal">{onCooldown ? `${Number(skill.remaining).toFixed(1)}s` : skill.description}</span>
             </span>
         </button>
@@ -282,7 +282,6 @@ const PrestigeUpgradesPanel = ({ relics, upgrades, onUpgrade }) => (
     </div>
 );
 
-// NUEVO: Panel de Habilidades Pasivas
 const PassiveSkillsPanel = ({ skillPoints, skills, onUpgrade }) => (
     <div className="bg-gray-800 p-6 rounded-lg shadow-lg h-full">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Habilidades Pasivas</h2>
@@ -347,13 +346,10 @@ const FloatingText = ({ text, x, y, color, id }) => {
 export default function App() {
     const [gameState, setGameState] = useState(initialGameState);
     const [offlineGains, setOfflineGains] = useState(null);
-    const [activeTab, setActiveTab] = useState('upgrades'); // NUEVO: Estado para las pestañas
+    const [activeTab, setActiveTab] = useState('upgrades');
 
     const totalStats = useMemo(() => {
-        // Bonificaciones de Prestigio
         const prestigeDamageBonus = 1 + (gameState.prestigeUpgrades.damageBonus.level * gameState.prestigeUpgrades.damageBonus.increase);
-        
-        // NUEVO: Bonificaciones de Habilidades Pasivas
         const passiveDamageBonus = 1 + (gameState.passiveSkills.increasedDamage.level * gameState.passiveSkills.increasedDamage.increase);
         const passiveHealthBonus = 1 + (gameState.passiveSkills.increasedHealth.level * gameState.passiveSkills.increasedHealth.increase);
 
@@ -363,7 +359,6 @@ export default function App() {
             critChance: gameState.hero.critChance,
         };
 
-        // Bonificaciones de Equipamiento
         for (const slot in gameState.hero.equipment) {
             const item = gameState.hero.equipment[slot];
             if (item) {
@@ -489,15 +484,23 @@ export default function App() {
                 addLogMessage(`Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-green-400');
                 createFloatingText(damageDealt.toFixed(0), 'white');
             }
+            
+            // NUEVO: Activar animación de golpe
+            const newStateWithAnimation = { ...prev, monsterAnimation: 'shake' };
+            setTimeout(() => setGameState(p => ({ ...p, monsterAnimation: '' })), 200);
+
 
             const newMonsterHp = prev.monster.hp - damageDealt;
             let newState = { 
-                ...prev, 
+                ...newStateWithAnimation, 
                 monster: { ...prev.monster, hp: newMonsterHp },
                 effects: { ...prev.effects, powerfulStrikeActive: false }
             };
 
             if (newMonsterHp <= 0) {
+                 // NUEVO: Activar animación de muerte
+                newState.monsterAnimation = 'fadeOut';
+
                 if (prev.isBossFight) {
                     addLogMessage(`¡JEFE DERROTADO!`, 'text-yellow-400 font-bold text-lg');
                     newState.stage++;
@@ -532,7 +535,7 @@ export default function App() {
                 let newXpNeeded = newState.hero.xpNeeded;
                 let newMaxHp = newState.hero.maxHp;
                 let newDamage = newState.hero.damage;
-                let newSkillPoints = newState.hero.skillPoints; // NUEVO
+                let newSkillPoints = newState.hero.skillPoints;
 
                 while (newXp >= newXpNeeded) {
                     newLevel++;
@@ -540,7 +543,7 @@ export default function App() {
                     newXpNeeded = Math.round(newXpNeeded * 1.5);
                     newMaxHp += 20;
                     newDamage += 5;
-                    newSkillPoints++; // NUEVO: Gana un punto de habilidad
+                    newSkillPoints++;
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newLevel}.`, 'text-blue-400 font-bold');
                 }
                 
@@ -552,7 +555,7 @@ export default function App() {
                     maxHp: newMaxHp,
                     damage: newDamage,
                     hp: totalStats.maxHp, 
-                    skillPoints: newSkillPoints, // NUEVO
+                    skillPoints: newSkillPoints,
                 };
             }
             return newState;
@@ -585,7 +588,6 @@ export default function App() {
                     return prev;
             }
             
-            // NUEVO: Aplicar reducción de enfriamiento de pasivas
             const cooldownReduction = 1 - (prev.passiveSkills.fasterCooldowns.level * prev.passiveSkills.fasterCooldowns.increase);
             const finalCooldown = Math.max(1, skill.cooldown * cooldownReduction);
 
@@ -628,10 +630,9 @@ export default function App() {
             const relicsGained = Math.floor(prev.stage / 5) + prev.hero.level;
             addLogMessage(`¡RENACIMIENTO! Has ganado ${relicsGained} reliquias.`, 'text-yellow-200 font-bold text-lg');
 
-            // Habilidades pasivas y mejoras de reliquias persisten
             return {
                 ...prev,
-                hero: { ...initialHeroState }, // Reinicia el héroe
+                hero: { ...initialHeroState, skillPoints: prev.hero.skillPoints },
                 inventory: [],
                 upgrades: initialGameState.upgrades,
                 stage: 1,
@@ -666,7 +667,6 @@ export default function App() {
         });
     }, []);
 
-    // NUEVO: Manejador para mejorar habilidades pasivas
     const handlePassiveSkillUpgrade = useCallback((skillId) => {
         setGameState(prev => {
             const skill = prev.passiveSkills[skillId];
@@ -678,7 +678,6 @@ export default function App() {
                 [skillId]: {
                     ...skill,
                     level: skill.level + 1,
-                    // Aumentar el costo para el siguiente nivel, por ejemplo
                     cost: skill.cost + (skill.level < 5 ? 1 : 2),
                 }
             };
@@ -724,7 +723,7 @@ export default function App() {
                 } else {
                     spawnNewMonster();
                 }
-            }, 500);
+            }, 1000); // Aumentado para dar tiempo a la animación de muerte
             return () => clearTimeout(timeout);
         }
     }, [gameState.monster.hp, gameState.monstersKilledInStage, gameState.monstersPerStage, gameState.isBossFight, spawnNewMonster, spawnBoss]);
@@ -754,14 +753,13 @@ export default function App() {
         if (savedStateJSON) {
             let loadedState = JSON.parse(savedStateJSON);
             
-            // Fusionar estado guardado con el inicial para evitar errores si se añaden nuevas propiedades
             loadedState = {
                 ...initialGameState,
                 ...loadedState,
                 hero: { ...initialGameState.hero, ...loadedState.hero },
                 prestige: { ...initialGameState.prestige, ...loadedState.prestige },
                 prestigeUpgrades: { ...initialGameState.prestigeUpgrades, ...loadedState.prestigeUpgrades },
-                passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills }, // Asegurar que las pasivas se cargan
+                passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills },
             };
 
 
@@ -790,7 +788,7 @@ export default function App() {
                         loadedState.hero.xpNeeded = Math.round(loadedState.hero.xpNeeded * 1.5);
                         loadedState.hero.maxHp += 20;
                         loadedState.hero.damage += 5;
-                        loadedState.hero.skillPoints++; // Gana puntos de habilidad offline
+                        loadedState.hero.skillPoints++;
                     }
                     loadedState.hero.xp = currentXp;
                     loadedState.hero.hp = loadedState.hero.maxHp;
@@ -836,11 +834,27 @@ export default function App() {
         });
     };
     
-    const floatUpAnimation = `@keyframes floatUp {
-        from { opacity: 1; transform: translateY(0); }
-        to { opacity: 0; transform: translateY(-50px); }
-    }`;
-    const floatingTextStyles = `.floating-text { animation: floatUp 1s ease-out forwards; }`;
+    // NUEVO: Definiciones de animaciones
+    const animations = `
+        @keyframes floatUp {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(-50px); }
+        }
+        .floating-text { animation: floatUp 1s ease-out forwards; }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px) rotate(-2deg); }
+            75% { transform: translateX(5px) rotate(2deg); }
+        }
+        .shake { animation: shake 0.2s ease-in-out; }
+
+        @keyframes fadeOut {
+            from { opacity: 1; transform: scale(1); }
+            to { opacity: 0; transform: scale(0.5); }
+        }
+        .fadeOut { animation: fadeOut 0.5s ease-out forwards; }
+    `;
 
     const TabButton = ({ tabName, children }) => (
         <button 
@@ -853,8 +867,7 @@ export default function App() {
 
     return (
         <div className="bg-gray-900 text-white flex items-center justify-center min-h-screen font-sans">
-            <style>{floatUpAnimation}</style>
-            <style>{floatingTextStyles}</style>
+            <style>{animations}</style>
 
             {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={() => setOfflineGains(null)} />}
 
@@ -879,6 +892,7 @@ export default function App() {
                            combatLog={gameState.combatLog}
                            isBossFight={gameState.isBossFight}
                            bossTimer={gameState.bossTimer}
+                           monsterAnimation={gameState.monsterAnimation}
                        />
                        <InventoryPanel 
                             equipment={gameState.hero.equipment} 
@@ -889,7 +903,6 @@ export default function App() {
                     </div>
                     {/* Columna Derecha */}
                     <div className="flex flex-col gap-6">
-                        {/* NUEVO: Sistema de Pestañas */}
                         <div className="flex">
                             <TabButton tabName="upgrades">Mejoras</TabButton>
                             <TabButton tabName="prestige">Reliquias</TabButton>
