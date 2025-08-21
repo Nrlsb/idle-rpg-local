@@ -24,6 +24,58 @@ const PETS = {
     sprite: { id: 'sprite', name: 'Hada de la Suerte', icon: '🧚', bonusStat: 'critChance', bonusPerLevel: 0.005, description: '+0.5% Prob. Crítico por nivel' },
 };
 
+// NUEVO: Habilidades de Monstruos
+const MONSTER_ABILITIES = {
+    heal: {
+        name: 'Curación Menor',
+        description: 'Se cura un 5% de su vida máxima cuando está por debajo del 50% de HP (una vez por combate).',
+        color: 'text-green-400',
+        trigger: 'onDamage',
+        effect: (monster, hero, gameState, addLogMessage, createFloatingText) => {
+            if (!monster.usedHeal && monster.hp < monster.maxHp / 2) {
+                const healAmount = Math.round(monster.maxHp * 0.05);
+                monster.hp = Math.min(monster.maxHp, monster.hp + healAmount);
+                monster.usedHeal = true;
+                addLogMessage(`${monster.name} usa Curación Menor y recupera ${healAmount} HP.`, 'text-green-400');
+                createFloatingText(`+${healAmount} HP`, 'lightgreen');
+            }
+            return { monster, hero };
+        }
+    },
+    dodge: {
+        name: 'Evasión',
+        description: 'Tiene un 15% de probabilidad de esquivar un ataque.',
+        color: 'text-cyan-400',
+        trigger: 'beforeDamage',
+        effect: (monster, hero, gameState, addLogMessage, createFloatingText, damageDealt) => {
+            if (Math.random() < 0.15) {
+                addLogMessage(`${monster.name} esquiva el ataque!`, 'text-cyan-400');
+                createFloatingText('Esquiva!', 'cyan');
+                return { monster, hero, damageDealt: 0 }; // Anula el daño
+            }
+            return { monster, hero, damageDealt };
+        }
+    },
+    poison: {
+        name: 'Ataque Venenoso',
+        description: 'Tiene un 25% de probabilidad de envenenar al héroe, infligiendo un 2% de la vida máxima del héroe como daño durante 5 segundos.',
+        color: 'text-purple-400',
+        trigger: 'onMonsterAttack',
+        effect: (monster, hero, gameState, addLogMessage, createFloatingText) => {
+            if (Math.random() < 0.25 && !hero.effects.poisoned) {
+                addLogMessage(`${monster.name} envenena al héroe!`, 'text-purple-400');
+                createFloatingText('Venenoso!', 'purple');
+                hero.effects.poisoned = {
+                    duration: 5,
+                    damage: hero.maxHp * 0.02
+                };
+            }
+            return { monster, hero };
+        }
+    }
+};
+
+
 // --- Estado Inicial del Juego ---
 const initialHeroState = {
     level: 1,
@@ -45,6 +97,9 @@ const initialHeroState = {
         shield: null,
         amulet: null,
     },
+    effects: { // Efectos sobre el héroe
+        poisoned: null, // { duration: 5, damage: 2 }
+    },
 };
 
 const initialGameState = {
@@ -57,6 +112,8 @@ const initialGameState = {
         goldReward: 5,
         xpReward: 10,
         art: '👹',
+        abilities: [], // NUEVO: Habilidades del monstruo
+        usedHeal: false, // NUEVO: Para la habilidad de curación
     },
     upgrades: {
         damage: { cost: 10, increase: 1, level: 0 },
@@ -93,7 +150,7 @@ const initialGameState = {
     bossArt: ['😈', '🤡', '👹', '🧛', '🧟', '🧞', '🦍', '🐊', '🦖', '🐙'],
     combatLog: [],
     floatingTexts: [],
-    toasts: [], // NUEVO: Estado para notificaciones
+    toasts: [],
     isBossFight: false,
     bossTimer: 30,
     prestige: {
@@ -115,14 +172,13 @@ const initialGameState = {
 
 // --- COMPONENTES DE UI ---
 
-// NUEVO: Componente para una notificación individual
 const Toast = ({ message, type, onDismiss }) => {
     const [exiting, setExiting] = useState(false);
 
     useEffect(() => {
         const timer = setTimeout(() => {
             setExiting(true);
-            setTimeout(onDismiss, 500); // Coincide con la duración de la animación de salida
+            setTimeout(onDismiss, 500);
         }, 5000);
 
         return () => clearTimeout(timer);
@@ -150,7 +206,6 @@ const Toast = ({ message, type, onDismiss }) => {
     );
 };
 
-// NUEVO: Componente para contener todas las notificaciones
 const ToastContainer = ({ toasts, onDismiss }) => (
     <div className="fixed top-4 right-4 z-50 w-80">
         {toasts.map(toast => (
@@ -170,7 +225,7 @@ const HeroPanel = ({ hero, stats, prestige, activePet }) => {
             <div className="space-y-3 text-lg mt-2">
                 <p><strong>Nivel:</strong> {hero.level}</p>
                 <p><strong>Puntos de Habilidad:</strong> <span className="text-green-400 font-bold">{hero.skillPoints}</span></p>
-                <p><strong>HP:</strong> {Math.round(hero.hp)} / {stats.maxHp}</p>
+                <p><strong>HP:</strong> {Math.round(hero.hp)} / {stats.maxHp} {hero.effects.poisoned && <span className="text-purple-400">(Envenenado)</span>}</p>
                 <p><strong>Daño:</strong> {stats.damage.toFixed(1)}</p>
                 <p><strong>Prob. Crítico:</strong> {(stats.critChance * 100).toFixed(2)}%</p>
                 <p><strong>Oro:</strong> {hero.gold}</p>
@@ -200,6 +255,12 @@ const CombatPanel = ({ monster, stage, combatLog, isBossFight, bossTimer, monste
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col items-center justify-between h-full">
             <div>
                 <h2 className={`text-2xl font-bold text-center ${isBossFight ? 'text-yellow-400 animate-pulse' : 'text-red-400'}`}>{monster.name}</h2>
+                <div className="text-center my-2 h-6">
+                    {monster.abilities.map(abilityId => {
+                        const ability = MONSTER_ABILITIES[abilityId];
+                        return <span key={abilityId} className={`text-xs font-bold px-2 py-1 rounded-full mr-1 ${ability.color}`}>{ability.name}</span>
+                    })}
+                </div>
                 <div id="monster-art-container" className={`text-6xl text-center my-4 relative ${isBossFight ? 'transform scale-125' : ''} ${monsterAnimation}`}>{monster.art}</div>
                 <div className="relative">
                     <div className="w-full bg-gray-700 rounded-full h-6">
@@ -631,7 +692,6 @@ const useGameLogic = (audioManager) => {
         return stats;
     }, [gameState.hero, gameState.prestigeUpgrades, gameState.passiveSkills, gameState.pets]);
 
-    // NUEVO: Función para añadir notificaciones
     const addToast = useCallback((message, type = 'info') => {
         const id = Date.now() + Math.random();
         setGameState(prev => ({
@@ -640,7 +700,6 @@ const useGameLogic = (audioManager) => {
         }));
     }, []);
 
-    // NUEVO: Función para descartar notificaciones
     const dismissToast = useCallback((id) => {
         setGameState(prev => ({
             ...prev,
@@ -720,9 +779,11 @@ const useGameLogic = (audioManager) => {
                 goldReward: Math.round(5 * stageMultiplier * 15),
                 xpReward: Math.round(10 * stageMultiplier * 15),
                 art: prev.bossArt[Math.floor(Math.random() * prev.bossArt.length)],
+                abilities: ['heal', 'dodge', 'poison'], // Los jefes tienen todas las habilidades
+                usedHeal: false,
             };
             addLogMessage(`¡Un JEFE ha aparecido: ${boss.name}!`, 'text-yellow-400 font-bold');
-            addToast(`¡Un JEFE ha aparecido!`, 'warning'); // NUEVO: Toast de jefe
+            addToast(`¡Un JEFE ha aparecido!`, 'warning');
             return { ...prev, monster: boss, isBossFight: true, bossTimer: 30 };
         });
     }, [addLogMessage, addToast]);
@@ -732,6 +793,12 @@ const useGameLogic = (audioManager) => {
             const stageMultiplier = 1 + (prev.stage - 1) * 0.2;
             const monsterNames = ["Goblin", "Esqueleto", "Limo", "Lobo", "Araña Gigante", "Golem", "Dragón Joven"];
             
+            // Asignar habilidades aleatorias a monstruos normales
+            const abilities = [];
+            if (Math.random() < 0.2) abilities.push('heal');
+            if (Math.random() < 0.1) abilities.push('dodge');
+            if (Math.random() < 0.15) abilities.push('poison');
+
             const newMonster = {
                 ...prev.monster,
                 name: `${monsterNames[Math.floor(Math.random() * monsterNames.length)]} (Etapa ${prev.stage})`,
@@ -740,6 +807,8 @@ const useGameLogic = (audioManager) => {
                 goldReward: Math.round(5 * stageMultiplier),
                 xpReward: Math.round(10 * stageMultiplier),
                 art: prev.monsterArt[Math.floor(Math.random() * prev.monsterArt.length)],
+                abilities: abilities,
+                usedHeal: false,
             };
             addLogMessage(`Un ${newMonster.name} salvaje apareció!`, 'text-gray-400');
             return { ...prev, monster: newMonster, isBossFight: false };
@@ -753,25 +822,33 @@ const useGameLogic = (audioManager) => {
             let damageDealt = totalStats.damage;
             let isCrit = Math.random() < totalStats.critChance;
             
-            if (prev.effects.powerfulStrikeActive) {
-                damageDealt *= 3;
-                addLogMessage(`¡GOLPE PODEROSO! Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-orange-500 font-bold');
-                createFloatingText(damageDealt.toFixed(0), 'orange');
-                 audioManager?.playSound('crit');
-            } else if (isCrit) {
-                damageDealt = Math.round(damageDealt * prev.hero.critMultiplier);
-                addLogMessage(`¡GOLPE CRÍTICO! Héroe ataca por ${damageDealt} de daño.`, 'text-yellow-400');
-                createFloatingText(damageDealt, 'yellow');
-                 audioManager?.playSound('crit');
-            } else {
-                addLogMessage(`Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-green-400');
-                createFloatingText(damageDealt.toFixed(0), 'white');
-                 audioManager?.playSound('attack');
+            // Habilidad de esquivar del monstruo
+            let modifiedState = { ...prev };
+            if (prev.monster.abilities.includes('dodge')) {
+                const result = MONSTER_ABILITIES.dodge.effect(prev.monster, prev.hero, prev, addLogMessage, createFloatingText, damageDealt);
+                damageDealt = result.damageDealt;
+            }
+
+            if (damageDealt > 0) {
+                if (prev.effects.powerfulStrikeActive) {
+                    damageDealt *= 3;
+                    addLogMessage(`¡GOLPE PODEROSO! Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-orange-500 font-bold');
+                    createFloatingText(damageDealt.toFixed(0), 'orange');
+                    audioManager?.playSound('crit');
+                } else if (isCrit) {
+                    damageDealt = Math.round(damageDealt * prev.hero.critMultiplier);
+                    addLogMessage(`¡GOLPE CRÍTICO! Héroe ataca por ${damageDealt} de daño.`, 'text-yellow-400');
+                    createFloatingText(damageDealt, 'yellow');
+                    audioManager?.playSound('crit');
+                } else {
+                    addLogMessage(`Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-green-400');
+                    createFloatingText(damageDealt.toFixed(0), 'white');
+                    audioManager?.playSound('attack');
+                }
             }
             
-            const newStateWithAnimation = { ...prev, monsterAnimation: 'shake' };
+            const newStateWithAnimation = { ...modifiedState, monsterAnimation: 'shake' };
             setTimeout(() => setGameState(p => ({ ...p, monsterAnimation: '' })), 200);
-
 
             const newMonsterHp = prev.monster.hp - damageDealt;
             let newState = { 
@@ -779,6 +856,12 @@ const useGameLogic = (audioManager) => {
                 monster: { ...prev.monster, hp: newMonsterHp },
                 effects: { ...prev.effects, powerfulStrikeActive: false }
             };
+
+            // Habilidad de curación del monstruo
+            if (newState.monster.abilities.includes('heal')) {
+                const result = MONSTER_ABILITIES.heal.effect(newState.monster, newState.hero, newState, addLogMessage, createFloatingText);
+                newState.monster = result.monster;
+            }
 
             if (newMonsterHp <= 0) {
                 newState.monsterAnimation = 'fadeOut';
@@ -815,7 +898,6 @@ const useGameLogic = (audioManager) => {
                     newState.inventory = [...newState.inventory, loot];
                     const rarityInfo = ITEM_RARITIES[loot.rarity];
                     addLogMessage(`¡Has encontrado ${loot.name}!`, rarityInfo.color);
-                    // NUEVO: Toast para botín raro/épico
                     if (loot.rarity === 'rare' || loot.rarity === 'epic') {
                         addToast(`¡Botín ${rarityInfo.name}! ${loot.icon} ${loot.name}`, `loot-${loot.rarity}`);
                     }
@@ -838,7 +920,7 @@ const useGameLogic = (audioManager) => {
                     newDamage += 5;
                     newSkillPoints++;
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newLevel}.`, 'text-blue-400 font-bold');
-                    addToast(`¡Nivel ${newLevel} alcanzado!`, 'success'); // NUEVO: Toast de subida de nivel
+                    addToast(`¡Nivel ${newLevel} alcanzado!`, 'success');
                     audioManager?.playSound('levelUp');
                 }
                 
@@ -857,6 +939,40 @@ const useGameLogic = (audioManager) => {
         });
     }, [addLogMessage, createFloatingText, generateLoot, totalStats, audioManager, addToast]);
     
+    // NUEVO: Lógica de ataque del monstruo y efectos de estado
+    const monsterAttack = useCallback(() => {
+        setGameState(prev => {
+            let newHero = { ...prev.hero };
+            let newMonster = { ...prev.monster };
+
+            // Habilidad de veneno del monstruo
+            if (newMonster.abilities.includes('poison')) {
+                const result = MONSTER_ABILITIES.poison.effect(newMonster, newHero, prev, addLogMessage, createFloatingText);
+                newHero = result.hero;
+            }
+
+            // Aplicar daño de veneno si el héroe está envenenado
+            if (newHero.effects.poisoned) {
+                newHero.hp -= newHero.effects.poisoned.damage;
+                addLogMessage(`Sufres ${newHero.effects.poisoned.damage.toFixed(0)} de daño por veneno.`, 'text-purple-400');
+                createFloatingText(`-${newHero.effects.poisoned.damage.toFixed(0)}`, 'purple');
+                newHero.effects.poisoned.duration -= 1;
+                if (newHero.effects.poisoned.duration <= 0) {
+                    newHero.effects.poisoned = null;
+                    addLogMessage('El veneno ha desaparecido.', 'text-gray-400');
+                }
+            }
+
+            if (newHero.hp <= 0) {
+                addLogMessage('¡Has sido derrotado! Te recuperas...', 'text-red-600 font-bold');
+                newHero.hp = totalStats.maxHp;
+            }
+
+            return { ...prev, hero: newHero };
+        });
+    }, [addLogMessage, createFloatingText, totalStats]);
+
+
     const useSkill = useCallback((skillId) => {
         setGameState(prev => {
             const skill = prev.skills[skillId];
@@ -1012,7 +1128,7 @@ const useGameLogic = (audioManager) => {
 
             const relicsGained = Math.floor(prev.stage / 5) + prev.hero.level;
             addLogMessage(`¡RENACIMIENTO! Has ganado ${relicsGained} reliquias.`, 'text-yellow-200 font-bold text-lg');
-            addToast(`¡Renacimiento! +${relicsGained} Reliquias`, 'prestige'); // NUEVO: Toast de prestigio
+            addToast(`¡Renacimiento! +${relicsGained} Reliquias`, 'prestige');
 
             return {
                 ...prev,
@@ -1148,9 +1264,10 @@ const useGameLogic = (audioManager) => {
             if (!gameState.isBossFight || gameState.bossTimer > 0) {
                 heroAttack();
             }
+            monsterAttack(); // El monstruo ataca/usa efectos cada segundo
         }, 1000);
         return () => clearInterval(gameInterval);
-    }, [heroAttack, gameState.isBossFight, gameState.bossTimer]);
+    }, [heroAttack, monsterAttack, gameState.isBossFight, gameState.bossTimer]);
     
     useEffect(() => {
         const cooldownInterval = setInterval(() => {
@@ -1218,7 +1335,7 @@ const useGameLogic = (audioManager) => {
                 passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills },
                 pets: { ...initialGameState.pets, ...loadedState.pets },
                 settings: { ...initialGameState.settings, ...loadedState.settings },
-                toasts: [], // Asegurarse de que los toasts no se carguen
+                toasts: [],
             };
 
             const today = new Date().toISOString().split('T')[0];
@@ -1294,7 +1411,7 @@ const useGameLogic = (audioManager) => {
             handleToggleMusic,
             handleToggleSfx,
             clearOfflineGains,
-            dismissToast, // Exportar el handler
+            dismissToast,
         }
     };
 };
@@ -1333,7 +1450,6 @@ export default function App() {
         @keyframes fadeOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.5); } }
         .fadeOut { animation: fadeOut 0.5s ease-out forwards; }
         
-        /* NUEVO: Animaciones para Toasts */
         @keyframes toast-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         .animate-toast-in { animation: toast-in 0.5s ease-out forwards; }
         @keyframes toast-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
@@ -1373,7 +1489,6 @@ export default function App() {
             {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={handlers.clearOfflineGains} />}
             {dailyReward && <DailyRewardModal reward={dailyReward} onClose={handlers.handleClaimDailyReward} />}
             
-            {/* NUEVO: Renderizar el contenedor de toasts */}
             <ToastContainer toasts={gameState.toasts} onDismiss={handlers.dismissToast} />
 
             {gameState.floatingTexts.map(ft => (
