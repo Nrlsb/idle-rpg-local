@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
+// --- Importaciones de Firebase ---
+import { initializeApp } from "firebase/app";
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "firebase/auth";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, serverTimestamp } from "firebase/firestore";
+
 // --- Constantes del Juego ---
 const ITEM_RARITIES = {
     common: { name: 'Común', color: 'text-gray-300', multiplier: 1, dismantle: { scrap: 1 }, sellValue: 5 },
@@ -93,7 +98,7 @@ const initialGameState = {
     bossArt: ['😈', '🤡', '👹', '🧛', '🧟', '🧞', '🦍', '🐊', '🦖', '🐙'],
     combatLog: [],
     floatingTexts: [],
-    toasts: [], // NUEVO: Estado para notificaciones
+    toasts: [],
     isBossFight: false,
     bossTimer: 30,
     prestige: {
@@ -115,14 +120,13 @@ const initialGameState = {
 
 // --- COMPONENTES DE UI ---
 
-// NUEVO: Componente para una notificación individual
 const Toast = ({ message, type, onDismiss }) => {
     const [exiting, setExiting] = useState(false);
 
     useEffect(() => {
         const timer = setTimeout(() => {
             setExiting(true);
-            setTimeout(onDismiss, 500); // Coincide con la duración de la animación de salida
+            setTimeout(onDismiss, 500);
         }, 5000);
 
         return () => clearTimeout(timer);
@@ -150,7 +154,6 @@ const Toast = ({ message, type, onDismiss }) => {
     );
 };
 
-// NUEVO: Componente para contener todas las notificaciones
 const ToastContainer = ({ toasts, onDismiss }) => (
     <div className="fixed top-4 right-4 z-50 w-80">
         {toasts.map(toast => (
@@ -160,11 +163,12 @@ const ToastContainer = ({ toasts, onDismiss }) => (
 );
 
 
-const HeroPanel = ({ hero, stats, prestige, activePet }) => {
+const HeroPanel = ({ hero, stats, prestige, activePet, userId }) => {
     const xpPercentage = (hero.xp / hero.xpNeeded) * 100;
     return (
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold mb-2 text-center border-b border-gray-700 pb-2">Héroe</h2>
+            {userId && <p className="text-center text-xs text-gray-400 break-all mb-2">ID: {userId}</p>}
             {activePet && <p className="text-center text-lg">{activePet.icon} {activePet.name} <span className="text-yellow-400">Nvl. {hero.petLevel}</span></p>}
             {prestige.level > 0 && <p className="text-center text-yellow-400 font-bold">Prestigio: {prestige.level}</p>}
             <div className="space-y-3 text-lg mt-2">
@@ -593,12 +597,15 @@ const useAudioManager = (settings) => {
     return audioManager.current;
 };
 
-const useGameLogic = (audioManager) => {
-    const [gameState, setGameState] = useState(initialGameState);
+const useGameLogic = (audioManager, db, auth, userId) => {
+    const [gameState, setGameState] = useState(null); // Inicia como null hasta cargar desde Firebase
     const [offlineGains, setOfflineGains] = useState(null);
     const [dailyReward, setDailyReward] = useState(null);
+    const isInitialLoad = useRef(true);
 
     const totalStats = useMemo(() => {
+        if (!gameState) return initialHeroState;
+
         const prestigeDamageBonus = 1 + (gameState.prestigeUpgrades.damageBonus.level * gameState.prestigeUpgrades.damageBonus.increase);
         const passiveDamageBonus = 1 + (gameState.passiveSkills.increasedDamage.level * gameState.passiveSkills.increasedDamage.increase);
         const passiveHealthBonus = 1 + (gameState.passiveSkills.increasedHealth.level * gameState.passiveSkills.increasedHealth.increase);
@@ -629,18 +636,16 @@ const useGameLogic = (audioManager) => {
             }
         }
         return stats;
-    }, [gameState.hero, gameState.prestigeUpgrades, gameState.passiveSkills, gameState.pets]);
+    }, [gameState]);
 
-    // NUEVO: Función para añadir notificaciones
     const addToast = useCallback((message, type = 'info') => {
         const id = Date.now() + Math.random();
         setGameState(prev => ({
             ...prev,
-            toasts: [...prev.toasts, { id, message, type }],
+            toasts: [...(prev?.toasts || []), { id, message, type }],
         }));
     }, []);
 
-    // NUEVO: Función para descartar notificaciones
     const dismissToast = useCallback((id) => {
         setGameState(prev => ({
             ...prev,
@@ -651,7 +656,7 @@ const useGameLogic = (audioManager) => {
     const addLogMessage = useCallback((text, color) => {
         setGameState(prev => ({
             ...prev,
-            combatLog: [...prev.combatLog.slice(-10), { text, color }],
+            combatLog: [...(prev?.combatLog || []).slice(-10), { text, color }],
         }));
     }, []);
 
@@ -665,7 +670,7 @@ const useGameLogic = (audioManager) => {
 
         setGameState(prev => ({
             ...prev,
-            floatingTexts: [...prev.floatingTexts, { id, text, x, y, color }],
+            floatingTexts: [...(prev?.floatingTexts || []), { id, text, x, y, color }],
         }));
 
         setTimeout(() => {
@@ -711,6 +716,7 @@ const useGameLogic = (audioManager) => {
 
     const spawnBoss = useCallback(() => {
         setGameState(prev => {
+            if (!prev) return null;
             const stageMultiplier = 1 + (prev.stage - 1) * 0.2;
             const bossNames = ["Rey Goblin", "Señor Esqueleto", "Limo Primordial", "Líder de la Manada", "Madre Araña"];
             const boss = {
@@ -722,13 +728,14 @@ const useGameLogic = (audioManager) => {
                 art: prev.bossArt[Math.floor(Math.random() * prev.bossArt.length)],
             };
             addLogMessage(`¡Un JEFE ha aparecido: ${boss.name}!`, 'text-yellow-400 font-bold');
-            addToast(`¡Un JEFE ha aparecido!`, 'warning'); // NUEVO: Toast de jefe
+            addToast(`¡Un JEFE ha aparecido!`, 'warning');
             return { ...prev, monster: boss, isBossFight: true, bossTimer: 30 };
         });
     }, [addLogMessage, addToast]);
 
     const spawnNewMonster = useCallback(() => {
         setGameState(prev => {
+            if (!prev) return null;
             const stageMultiplier = 1 + (prev.stage - 1) * 0.2;
             const monsterNames = ["Goblin", "Esqueleto", "Limo", "Lobo", "Araña Gigante", "Golem", "Dragón Joven"];
             
@@ -748,7 +755,7 @@ const useGameLogic = (audioManager) => {
 
     const heroAttack = useCallback(() => {
         setGameState(prev => {
-            if (prev.monster.hp <= 0) return prev;
+            if (!prev || prev.monster.hp <= 0) return prev;
 
             let damageDealt = totalStats.damage;
             let isCrit = Math.random() < totalStats.critChance;
@@ -770,7 +777,7 @@ const useGameLogic = (audioManager) => {
             }
             
             const newStateWithAnimation = { ...prev, monsterAnimation: 'shake' };
-            setTimeout(() => setGameState(p => ({ ...p, monsterAnimation: '' })), 200);
+            setTimeout(() => setGameState(p => p ? ({ ...p, monsterAnimation: '' }) : null), 200);
 
 
             const newMonsterHp = prev.monster.hp - damageDealt;
@@ -815,7 +822,6 @@ const useGameLogic = (audioManager) => {
                     newState.inventory = [...newState.inventory, loot];
                     const rarityInfo = ITEM_RARITIES[loot.rarity];
                     addLogMessage(`¡Has encontrado ${loot.name}!`, rarityInfo.color);
-                    // NUEVO: Toast para botín raro/épico
                     if (loot.rarity === 'rare' || loot.rarity === 'epic') {
                         addToast(`¡Botín ${rarityInfo.name}! ${loot.icon} ${loot.name}`, `loot-${loot.rarity}`);
                     }
@@ -838,7 +844,7 @@ const useGameLogic = (audioManager) => {
                     newDamage += 5;
                     newSkillPoints++;
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newLevel}.`, 'text-blue-400 font-bold');
-                    addToast(`¡Nivel ${newLevel} alcanzado!`, 'success'); // NUEVO: Toast de subida de nivel
+                    addToast(`¡Nivel ${newLevel} alcanzado!`, 'success');
                     audioManager?.playSound('levelUp');
                 }
                 
@@ -859,6 +865,7 @@ const useGameLogic = (audioManager) => {
     
     const useSkill = useCallback((skillId) => {
         setGameState(prev => {
+            if (!prev) return null;
             const skill = prev.skills[skillId];
             if (skill.remaining > 0) return prev;
 
@@ -894,6 +901,7 @@ const useGameLogic = (audioManager) => {
 
     const equipItem = useCallback((itemId) => {
         setGameState(prev => {
+            if (!prev) return null;
             const itemToEquip = prev.inventory.find(item => item.id === itemId);
             if (!itemToEquip) return prev;
 
@@ -910,6 +918,7 @@ const useGameLogic = (audioManager) => {
 
     const unequipItem = useCallback((slot) => {
         setGameState(prev => {
+            if (!prev) return null;
             const itemToUnequip = prev.hero.equipment[slot];
             if (!itemToUnequip) return prev;
 
@@ -921,6 +930,7 @@ const useGameLogic = (audioManager) => {
 
     const dismantleItem = useCallback((itemId) => {
         setGameState(prev => {
+            if (!prev) return null;
             const itemToDismantle = prev.inventory.find(item => item.id === itemId);
             if (!itemToDismantle) return prev;
             
@@ -945,6 +955,7 @@ const useGameLogic = (audioManager) => {
 
     const sellItem = useCallback((itemId) => {
         setGameState(prev => {
+            if (!prev) return null;
             const itemToSell = prev.inventory.find(item => item.id === itemId);
             if (!itemToSell) return prev;
 
@@ -965,6 +976,7 @@ const useGameLogic = (audioManager) => {
 
     const upgradeItem = useCallback((slot) => {
         setGameState(prev => {
+            if (!prev) return null;
             const item = prev.hero.equipment[slot];
             if (!item) return prev;
 
@@ -1008,11 +1020,11 @@ const useGameLogic = (audioManager) => {
 
     const handlePrestige = useCallback(() => {
         setGameState(prev => {
-            if (prev.hero.level < prev.prestige.nextLevelReq) return prev;
+            if (!prev || prev.hero.level < prev.prestige.nextLevelReq) return prev;
 
             const relicsGained = Math.floor(prev.stage / 5) + prev.hero.level;
             addLogMessage(`¡RENACIMIENTO! Has ganado ${relicsGained} reliquias.`, 'text-yellow-200 font-bold text-lg');
-            addToast(`¡Renacimiento! +${relicsGained} Reliquias`, 'prestige'); // NUEVO: Toast de prestigio
+            addToast(`¡Renacimiento! +${relicsGained} Reliquias`, 'prestige');
 
             return {
                 ...prev,
@@ -1034,6 +1046,7 @@ const useGameLogic = (audioManager) => {
 
     const handlePrestigeUpgrade = useCallback((upgradeId) => {
         setGameState(prev => {
+            if (!prev) return null;
             const upgrade = prev.prestigeUpgrades[upgradeId];
             if (prev.prestige.relics < upgrade.cost) return prev;
 
@@ -1053,6 +1066,7 @@ const useGameLogic = (audioManager) => {
 
     const handlePassiveSkillUpgrade = useCallback((skillId) => {
         setGameState(prev => {
+            if (!prev) return null;
             const skill = prev.passiveSkills[skillId];
             if (prev.hero.skillPoints < skill.cost) return prev;
 
@@ -1071,11 +1085,12 @@ const useGameLogic = (audioManager) => {
     }, []);
 
     const handleActivatePet = useCallback((petId) => {
-        setGameState(prev => ({ ...prev, pets: { ...prev.pets, activePetId: petId } }));
+        setGameState(prev => prev ? ({ ...prev, pets: { ...prev.pets, activePetId: petId } }) : null);
     }, []);
 
     const handleLevelUpPet = useCallback((petId) => {
         setGameState(prev => {
+            if (!prev) return null;
             const level = prev.pets.levels[petId] || 0;
             const cost = 100 * Math.pow(level + 1, 2);
             if (prev.hero.gold < cost) return prev;
@@ -1089,6 +1104,7 @@ const useGameLogic = (audioManager) => {
     const handleClaimDailyReward = useCallback(() => {
         if (!dailyReward) return;
         setGameState(prev => {
+            if (!prev) return null;
             const newHero = {
                 ...prev.hero,
                 gold: prev.hero.gold + dailyReward.gold,
@@ -1108,15 +1124,16 @@ const useGameLogic = (audioManager) => {
     }, [dailyReward, addLogMessage]);
 
     const handleToggleMusic = () => {
-        setGameState(prev => ({ ...prev, settings: { ...prev.settings, musicOn: !prev.settings.musicOn } }));
+        setGameState(prev => prev ? ({ ...prev, settings: { ...prev.settings, musicOn: !prev.settings.musicOn } }) : null);
     };
 
     const handleToggleSfx = () => {
-        setGameState(prev => ({ ...prev, settings: { ...prev.settings, sfxOn: !prev.settings.sfxOn } }));
+        setGameState(prev => prev ? ({ ...prev, settings: { ...prev.settings, sfxOn: !prev.settings.sfxOn } }) : null);
     };
 
     const handleUpgrade = (upgradeType) => {
         setGameState(prev => {
+            if (!prev) return null;
             const upgrade = prev.upgrades[upgradeType];
             if (prev.hero.gold < upgrade.cost) return prev;
 
@@ -1143,18 +1160,118 @@ const useGameLogic = (audioManager) => {
         setOfflineGains(null);
     }, []);
 
+    // --- Lógica de Firebase ---
+
+    // Cargar datos desde Firestore
     useEffect(() => {
+        if (!db || !userId) return;
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const docRef = doc(db, `artifacts/${appId}/users/${userId}/gameData`, "save");
+
+        const unsubscribe = onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                const loadedState = {
+                    ...initialGameState,
+                    ...data.gameState,
+                    toasts: [],
+                };
+                
+                // Calcular ganancias offline solo en la carga inicial
+                if (isInitialLoad.current) {
+                    isInitialLoad.current = false;
+                    const lastSaveTime = data.lastSaveTime?.toMillis();
+                    if (lastSaveTime) {
+                         const currentTime = Date.now();
+                        const offlineSeconds = Math.floor((currentTime - lastSaveTime) / 1000);
+
+                        if (offlineSeconds > 10) { 
+                            const goldBonus = 1 + (loadedState.prestigeUpgrades.goldBonus.level * loadedState.prestigeUpgrades.goldBonus.increase);
+                            const avgGoldPerKill = Math.round(5 * (1 + (loadedState.stage - 1) * 0.2) * goldBonus);
+                            const avgXpPerKill = Math.round(10 * (1 + (loadedState.stage - 1) * 0.2));
+                            const killsPerSecond = 1 / 4; 
+                            const offlineRate = 0.25; 
+
+                            const goldGained = Math.floor(offlineSeconds * killsPerSecond * avgGoldPerKill * offlineRate);
+                            let xpGained = Math.floor(offlineSeconds * killsPerSecond * avgXpPerKill * offlineRate);
+                            
+                            loadedState.hero.gold += goldGained;
+                            let currentXp = loadedState.hero.xp + xpGained;
+                            let levelsGained = 0;
+
+                            while (currentXp >= loadedState.hero.xpNeeded) {
+                                currentXp -= loadedState.hero.xpNeeded;
+                                loadedState.hero.level++;
+                                levelsGained++;
+                                loadedState.hero.xpNeeded = Math.round(loadedState.hero.xpNeeded * 1.5);
+                                loadedState.hero.maxHp += 20;
+                                loadedState.hero.damage += 5;
+                                loadedState.hero.skillPoints++;
+                            }
+                            loadedState.hero.xp = currentXp;
+                            
+                            // Asegurarse de que la vida se actualice con las nuevas stats
+                            const tempStats = { ...loadedState.hero, maxHp: loadedState.hero.maxHp * (1 + (loadedState.passiveSkills.increasedHealth.level * loadedState.passiveSkills.increasedHealth.increase))};
+                            loadedState.hero.hp = tempStats.maxHp;
+
+
+                            setOfflineGains({ gold: goldGained, xp: xpGained, time: offlineSeconds, levels: levelsGained });
+                        }
+                    }
+                }
+                setGameState(loadedState);
+
+            } else {
+                // Si no hay datos, crea un nuevo guardado con el estado inicial
+                console.log("No save data found, creating new one.");
+                setDoc(docRef, { gameState: initialGameState, lastSaveTime: serverTimestamp() });
+                setGameState(initialGameState);
+                isInitialLoad.current = false;
+            }
+        });
+
+        return () => unsubscribe();
+    }, [db, userId]);
+
+    // Guardar datos en Firestore con "debounce"
+    useEffect(() => {
+        if (!db || !userId || !gameState || isInitialLoad.current) return;
+
+        const handler = setTimeout(async () => {
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const docRef = doc(db, `artifacts/${appId}/users/${userId}/gameData`, "save");
+                // Excluir campos volátiles del guardado
+                const { floatingTexts, toasts, monsterAnimation, ...stateToSave } = gameState;
+                await setDoc(docRef, { gameState: stateToSave, lastSaveTime: serverTimestamp() });
+            } catch (error) {
+                console.error("Error saving game state:", error);
+            }
+        }, 2500); // Guardar 2.5 segundos después del último cambio
+
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [gameState, db, userId]);
+
+
+    // --- Game Loops ---
+    useEffect(() => {
+        if (!gameState) return;
         const gameInterval = setInterval(() => {
             if (!gameState.isBossFight || gameState.bossTimer > 0) {
                 heroAttack();
             }
         }, 1000);
         return () => clearInterval(gameInterval);
-    }, [heroAttack, gameState.isBossFight, gameState.bossTimer]);
+    }, [heroAttack, gameState?.isBossFight, gameState?.bossTimer]);
     
     useEffect(() => {
+        if (!gameState) return;
         const cooldownInterval = setInterval(() => {
             setGameState(prev => {
+                if (!prev) return null;
                 const newSkills = { ...prev.skills };
                 let changed = false;
                 for (const skillId in newSkills) {
@@ -1167,28 +1284,29 @@ const useGameLogic = (audioManager) => {
             });
         }, 1000);
         return () => clearInterval(cooldownInterval);
-    }, []);
+    }, [gameState]);
 
     useEffect(() => {
-        if (gameState.monster.hp <= 0) {
-            const timeout = setTimeout(() => {
-                if (gameState.isBossFight) {
-                    spawnNewMonster();
-                } else if (gameState.monstersKilledInStage >= gameState.monstersPerStage) {
-                    spawnBoss();
-                } else {
-                    spawnNewMonster();
-                }
-            }, 1000);
-            return () => clearTimeout(timeout);
-        }
-    }, [gameState.monster.hp, gameState.monstersKilledInStage, gameState.monstersPerStage, gameState.isBossFight, spawnNewMonster, spawnBoss]);
+        if (!gameState || gameState.monster.hp > 0) return;
+        
+        const timeout = setTimeout(() => {
+            if (gameState.isBossFight) {
+                spawnNewMonster();
+            } else if (gameState.monstersKilledInStage >= gameState.monstersPerStage) {
+                spawnBoss();
+            } else {
+                spawnNewMonster();
+            }
+        }, 1000);
+        return () => clearTimeout(timeout);
+    }, [gameState?.monster.hp, gameState?.monstersKilledInStage, gameState?.monstersPerStage, gameState?.isBossFight, spawnNewMonster, spawnBoss]);
     
     useEffect(() => {
-        if (!gameState.isBossFight) return;
+        if (!gameState || !gameState.isBossFight) return;
 
         const timerInterval = setInterval(() => {
             setGameState(prev => {
+                if (!prev) return null;
                 if (prev.bossTimer > 0) {
                     return { ...prev, bossTimer: prev.bossTimer - 1 };
                 } else {
@@ -1200,77 +1318,7 @@ const useGameLogic = (audioManager) => {
         }, 1000);
 
         return () => clearInterval(timerInterval);
-    }, [gameState.isBossFight, addLogMessage]);
-
-    useEffect(() => {
-        const savedStateJSON = localStorage.getItem('idleRpgGameState');
-        const lastSaveTime = localStorage.getItem('idleRpgLastSave');
-
-        if (savedStateJSON) {
-            let loadedState = JSON.parse(savedStateJSON);
-            
-            loadedState = {
-                ...initialGameState,
-                ...loadedState,
-                hero: { ...initialGameState.hero, ...loadedState.hero },
-                prestige: { ...initialGameState.prestige, ...loadedState.prestige },
-                prestigeUpgrades: { ...initialGameState.prestigeUpgrades, ...loadedState.prestigeUpgrades },
-                passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills },
-                pets: { ...initialGameState.pets, ...loadedState.pets },
-                settings: { ...initialGameState.settings, ...loadedState.settings },
-                toasts: [], // Asegurarse de que los toasts no se carguen
-            };
-
-            const today = new Date().toISOString().split('T')[0];
-            if (loadedState.lastDailyReward !== today) {
-                setDailyReward({ gold: 500, scrap: 10, essence: 2 });
-            }
-
-            if (lastSaveTime) {
-                const currentTime = Date.now();
-                const offlineSeconds = Math.floor((currentTime - parseInt(lastSaveTime, 10)) / 1000);
-
-                if (offlineSeconds > 10) { 
-                    const goldBonus = 1 + (loadedState.prestigeUpgrades.goldBonus.level * loadedState.prestigeUpgrades.goldBonus.increase);
-                    const avgGoldPerKill = Math.round(5 * (1 + (loadedState.stage - 1) * 0.2) * goldBonus);
-                    const avgXpPerKill = Math.round(10 * (1 + (loadedState.stage - 1) * 0.2));
-                    const killsPerSecond = 1 / 4; 
-                    const offlineRate = 0.25; 
-
-                    const goldGained = Math.floor(offlineSeconds * killsPerSecond * avgGoldPerKill * offlineRate);
-                    let xpGained = Math.floor(offlineSeconds * killsPerSecond * avgXpPerKill * offlineRate);
-                    
-                    loadedState.hero.gold += goldGained;
-                    let currentXp = loadedState.hero.xp + xpGained;
-                    let levelsGained = 0;
-
-                    while (currentXp >= loadedState.hero.xpNeeded) {
-                        currentXp -= loadedState.hero.xpNeeded;
-                        loadedState.hero.level++;
-                        levelsGained++;
-                        loadedState.hero.xpNeeded = Math.round(loadedState.hero.xpNeeded * 1.5);
-                        loadedState.hero.maxHp += 20;
-                        loadedState.hero.damage += 5;
-                        loadedState.hero.skillPoints++;
-                    }
-                    loadedState.hero.xp = currentXp;
-                    loadedState.hero.hp = loadedState.hero.maxHp;
-
-                    setOfflineGains({ gold: goldGained, xp: xpGained, time: offlineSeconds, levels: levelsGained });
-                }
-            }
-            setGameState(loadedState);
-        }
-    }, []);
-
-    useEffect(() => {
-        const saveInterval = setInterval(() => {
-            localStorage.setItem('idleRpgGameState', JSON.stringify(gameState));
-            localStorage.setItem('idleRpgLastSave', Date.now().toString());
-        }, 5000);
-
-        return () => clearInterval(saveInterval);
-    }, [gameState]);
+    }, [gameState?.isBossFight, addLogMessage]);
 
     return {
         gameState,
@@ -1294,7 +1342,7 @@ const useGameLogic = (audioManager) => {
             handleToggleMusic,
             handleToggleSfx,
             clearOfflineGains,
-            dismissToast, // Exportar el handler
+            dismissToast,
         }
     };
 };
@@ -1304,6 +1352,37 @@ const useGameLogic = (audioManager) => {
 export default function App() {
     const [isAudioReady, setIsAudioReady] = useState(false);
     const [activeTab, setActiveTab] = useState('upgrades');
+    const [firebase, setFirebase] = useState({ db: null, auth: null, userId: null, isAuthReady: false });
+
+    // --- Inicialización de Firebase ---
+    useEffect(() => {
+        try {
+            const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    setFirebase({ db, auth, userId: user.uid, isAuthReady: true });
+                } else {
+                    try {
+                        const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                        if (token) {
+                            await signInWithCustomToken(auth, token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Error en la autenticación anónima:", error);
+                    }
+                }
+            });
+        } catch (error) {
+            console.error("Error al inicializar Firebase:", error);
+            // Podrías mostrar un mensaje de error al usuario aquí
+        }
+    }, []);
 
     const audioManager = useAudioManager(initialGameState.settings); 
 
@@ -1313,7 +1392,7 @@ export default function App() {
         dailyReward,
         totalStats,
         handlers
-    } = useGameLogic(audioManager);
+    } = useGameLogic(audioManager, firebase.db, firebase.auth, firebase.userId);
 
     const handleStartGame = async () => {
         if (typeof window.Tone !== 'undefined') {
@@ -1332,8 +1411,6 @@ export default function App() {
         .shake { animation: shake 0.2s ease-in-out; }
         @keyframes fadeOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.5); } }
         .fadeOut { animation: fadeOut 0.5s ease-out forwards; }
-        
-        /* NUEVO: Animaciones para Toasts */
         @keyframes toast-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         .animate-toast-in { animation: toast-in 0.5s ease-out forwards; }
         @keyframes toast-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
@@ -1349,9 +1426,17 @@ export default function App() {
         </button>
     );
 
-    const activePet = PETS[gameState.pets.activePetId];
-    const petLevel = gameState.pets.levels[gameState.pets.activePetId];
-
+    if (!firebase.isAuthReady || !gameState) {
+         return (
+            <div className="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <h1 className="text-4xl font-bold mb-8 animate-pulse">Cargando...</h1>
+                    <p>Conectando con la nube</p>
+                </div>
+            </div>
+        );
+    }
+    
     if (!isAudioReady) {
         return (
             <div className="bg-gray-900 text-white flex items-center justify-center min-h-screen">
@@ -1365,6 +1450,9 @@ export default function App() {
             </div>
         );
     }
+    
+    const activePet = PETS[gameState.pets.activePetId];
+    const petLevel = gameState.pets.levels[gameState.pets.activePetId];
 
     return (
         <div className="bg-gray-900 text-white flex items-center justify-center min-h-screen font-sans">
@@ -1373,7 +1461,6 @@ export default function App() {
             {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={handlers.clearOfflineGains} />}
             {dailyReward && <DailyRewardModal reward={dailyReward} onClose={handlers.handleClaimDailyReward} />}
             
-            {/* NUEVO: Renderizar el contenedor de toasts */}
             <ToastContainer toasts={gameState.toasts} onDismiss={handlers.dismissToast} />
 
             {gameState.floatingTexts.map(ft => (
@@ -1385,7 +1472,7 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Columna Izquierda */}
                     <div className="flex flex-col gap-6">
-                       <HeroPanel hero={{...gameState.hero, petLevel}} stats={totalStats} prestige={gameState.prestige} activePet={activePet} />
+                       <HeroPanel hero={{...gameState.hero, petLevel}} stats={totalStats} prestige={gameState.prestige} activePet={activePet} userId={firebase.userId} />
                        <SettingsPanel settings={gameState.settings} onToggleMusic={handlers.handleToggleMusic} onToggleSfx={handlers.handleToggleSfx} />
                        <PetPanel pets={gameState.pets} gold={gameState.hero.gold} onActivate={handlers.handleActivatePet} onLevelUp={handlers.handleLevelUpPet} />
                        <SkillsPanel skills={gameState.skills} onUseSkill={handlers.useSkill} />
