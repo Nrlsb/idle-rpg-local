@@ -26,14 +26,12 @@ const initialGameState = {
         gold: 0,
         xp: 0,
         xpNeeded: 100,
-        // NUEVO: Espacios para el equipamiento
         equipment: {
             weapon: null,
             shield: null,
             amulet: null,
         },
     },
-    // NUEVO: Inventario para guardar los objetos
     inventory: [],
     monster: {
         name: "Orco Débil",
@@ -61,13 +59,17 @@ const initialGameState = {
     monstersKilledInStage: 0,
     monstersPerStage: 10,
     monsterArt: ['👹', '👺', '👻', '👽', '💀', '🤖', '🎃', '🐲', '🦂', '🦇'],
+    // NUEVO: Arte específico para los jefes
+    bossArt: ['😈', '🤡', '👹', '🧛', '🧟', '🧞', '🦍', '🐊', '🦖', '🐙'],
     combatLog: [],
     floatingTexts: [],
+    // NUEVO: Estado para la pelea contra el jefe
+    isBossFight: false,
+    bossTimer: 30,
 };
 
 // --- Componentes de la UI ---
 
-// MODIFICADO: El panel del héroe ahora muestra las estadísticas calculadas
 const HeroPanel = ({ hero, stats }) => {
     const xpPercentage = (hero.xp / hero.xpNeeded) * 100;
     return (
@@ -91,8 +93,8 @@ const HeroPanel = ({ hero, stats }) => {
     );
 };
 
-// Panel de Combate (sin cambios)
-const CombatPanel = ({ monster, stage, combatLog }) => {
+// MODIFICADO: El panel de combate ahora muestra el temporizador del jefe
+const CombatPanel = ({ monster, stage, combatLog, isBossFight, bossTimer }) => {
     const hpPercentage = (monster.hp / monster.maxHp) * 100;
     const logRef = useRef(null);
 
@@ -105,17 +107,21 @@ const CombatPanel = ({ monster, stage, combatLog }) => {
     return (
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col items-center justify-between h-full">
             <div>
-                <h2 className="text-2xl font-bold text-center text-red-400">{monster.name}</h2>
-                <div id="monster-art-container" className="text-6xl text-center my-4 relative">{monster.art}</div>
+                <h2 className={`text-2xl font-bold text-center ${isBossFight ? 'text-yellow-400 animate-pulse' : 'text-red-400'}`}>{monster.name}</h2>
+                <div id="monster-art-container" className={`text-6xl text-center my-4 relative ${isBossFight ? 'transform scale-125' : ''}`}>{monster.art}</div>
                 <div className="relative">
                     <div className="w-full bg-gray-700 rounded-full h-6">
-                        <div className="bg-red-600 h-6 rounded-full transition-all duration-300" style={{ width: `${hpPercentage}%` }}></div>
+                        <div className={`${isBossFight ? 'bg-yellow-500' : 'bg-red-600'} h-6 rounded-full transition-all duration-300`} style={{ width: `${hpPercentage}%` }}></div>
                     </div>
                     <p className="absolute inset-0 flex items-center justify-center font-bold">
                         {Math.round(monster.hp)} / {monster.maxHp}
                     </p>
                 </div>
-                <p className="text-center mt-2"><strong>Etapa:</strong> {stage}</p>
+                {isBossFight ? (
+                    <p className="text-center mt-2 text-2xl font-bold text-red-500">Tiempo: {bossTimer}</p>
+                ) : (
+                    <p className="text-center mt-2"><strong>Etapa:</strong> {stage}</p>
+                )}
             </div>
             <div ref={logRef} className="w-full h-48 bg-gray-900 rounded-lg mt-4 p-2 overflow-y-auto text-sm">
                 {combatLog.map((msg, index) => (
@@ -126,7 +132,6 @@ const CombatPanel = ({ monster, stage, combatLog }) => {
     );
 };
 
-// Panel de Mejoras (sin cambios)
 const UpgradeButton = ({ onClick, disabled, children }) => (
     <button onClick={onClick} disabled={disabled} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed">
         {children}
@@ -156,7 +161,6 @@ const UpgradesPanel = ({ gold, upgrades, onUpgrade }) => (
     </div>
 );
 
-// Componente de botón de habilidad (sin cambios)
 const SkillButton = ({ skill, onClick }) => {
     const onCooldown = skill.remaining > 0;
     const cooldownPercentage = (skill.cooldown - skill.remaining) / skill.cooldown * 100;
@@ -182,7 +186,6 @@ const SkillButton = ({ skill, onClick }) => {
     );
 };
 
-// Panel de Habilidades (sin cambios)
 const SkillsPanel = ({ skills, onUseSkill }) => (
     <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Habilidades</h2>
@@ -194,7 +197,6 @@ const SkillsPanel = ({ skills, onUseSkill }) => (
     </div>
 );
 
-// NUEVO: Componente para mostrar un objeto
 const ItemCard = ({ item, onClick, buttonText }) => {
     if (!item) {
         return <div className="bg-gray-700 p-2 rounded-lg text-center text-gray-400 h-24 flex items-center justify-center">Vacío</div>;
@@ -209,7 +211,6 @@ const ItemCard = ({ item, onClick, buttonText }) => {
     );
 };
 
-// NUEVO: Panel de Inventario y Equipamiento
 const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip }) => (
     <div className="bg-gray-800 p-6 rounded-lg shadow-lg md:col-span-2">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Equipamiento</h2>
@@ -227,8 +228,6 @@ const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip }) => (
     </div>
 );
 
-
-// Componente para el texto flotante (sin cambios)
 const FloatingText = ({ text, x, y, color, id }) => {
     const style = {
         left: `${x}px`,
@@ -246,7 +245,6 @@ const FloatingText = ({ text, x, y, color, id }) => {
 export default function App() {
     const [gameState, setGameState] = useState(initialGameState);
 
-    // NUEVO: useMemo para calcular las estadísticas totales del héroe
     const totalStats = useMemo(() => {
         const stats = {
             damage: gameState.hero.damage,
@@ -261,7 +259,6 @@ export default function App() {
         }
         return stats;
     }, [gameState.hero.damage, gameState.hero.maxHp, gameState.hero.critChance, gameState.hero.equipment]);
-
 
     const addLogMessage = useCallback((text, color) => {
         setGameState(prev => ({
@@ -291,20 +288,27 @@ export default function App() {
         }, 1000);
     }, []);
 
-    // NUEVO: Función para generar botín
-    const generateLoot = useCallback((stage) => {
-        if (Math.random() > 0.2) return null; // 20% de probabilidad de soltar un objeto
+    const generateLoot = useCallback((stage, isBoss = false) => {
+        // MODIFICADO: Aumenta la probabilidad de botín para los jefes
+        const dropChance = isBoss ? 0.8 : 0.2;
+        if (Math.random() > dropChance) return null;
 
         const rarityRoll = Math.random();
         let rarity;
-        if (rarityRoll < 0.05) rarity = 'epic';
-        else if (rarityRoll < 0.25) rarity = 'rare';
-        else rarity = 'common';
+        // MODIFICADO: Mejores probabilidades de rareza para jefes
+        if (isBoss) {
+            if (rarityRoll < 0.2) rarity = 'epic';
+            else if (rarityRoll < 0.6) rarity = 'rare';
+            else rarity = 'common';
+        } else {
+            if (rarityRoll < 0.05) rarity = 'epic';
+            else if (rarityRoll < 0.25) rarity = 'rare';
+            else rarity = 'common';
+        }
 
         const itemTypes = Object.keys(ITEM_TEMPLATES);
         const itemTypeKey = itemTypes[Math.floor(Math.random() * itemTypes.length)];
         const template = ITEM_TEMPLATES[itemTypeKey];
-
         const value = template.baseValue * ITEM_RARITIES[rarity].multiplier * (1 + (stage - 1) * 0.1);
 
         return {
@@ -317,6 +321,24 @@ export default function App() {
             rarity: rarity,
         };
     }, []);
+
+    // NUEVO: Función para invocar un jefe
+    const spawnBoss = useCallback(() => {
+        setGameState(prev => {
+            const stageMultiplier = 1 + (prev.stage - 1) * 0.2;
+            const bossNames = ["Rey Goblin", "Señor Esqueleto", "Limo Primordial", "Líder de la Manada", "Madre Araña"];
+            const boss = {
+                name: `${bossNames[Math.floor(Math.random() * bossNames.length)]} (JEFE)`,
+                maxHp: Math.round(50 * stageMultiplier * 10), // Mucha más vida
+                hp: Math.round(50 * stageMultiplier * 10),
+                goldReward: Math.round(5 * stageMultiplier * 15), // Mejores recompensas
+                xpReward: Math.round(10 * stageMultiplier * 15),
+                art: prev.bossArt[Math.floor(Math.random() * prev.bossArt.length)],
+            };
+            addLogMessage(`¡Un JEFE ha aparecido: ${boss.name}!`, 'text-yellow-400 font-bold');
+            return { ...prev, monster: boss, isBossFight: true, bossTimer: 30 };
+        });
+    }, [addLogMessage]);
 
     const spawnNewMonster = useCallback(() => {
         setGameState(prev => {
@@ -333,7 +355,7 @@ export default function App() {
                 art: prev.monsterArt[Math.floor(Math.random() * prev.monsterArt.length)],
             };
             addLogMessage(`Un ${newMonster.name} salvaje apareció!`, 'text-gray-400');
-            return { ...prev, monster: newMonster };
+            return { ...prev, monster: newMonster, isBossFight: false };
         });
     }, [addLogMessage]);
 
@@ -341,7 +363,6 @@ export default function App() {
         setGameState(prev => {
             if (prev.monster.hp <= 0) return prev;
 
-            // MODIFICADO: Usa las estadísticas totales para el combate
             let damageDealt = totalStats.damage;
             let isCrit = Math.random() < totalStats.critChance;
             
@@ -366,6 +387,16 @@ export default function App() {
             };
 
             if (newMonsterHp <= 0) {
+                // MODIFICADO: Lógica para después de derrotar a un monstruo/jefe
+                if (prev.isBossFight) {
+                    addLogMessage(`¡JEFE DERROTADO!`, 'text-yellow-400 font-bold text-lg');
+                    newState.stage++;
+                    newState.monstersKilledInStage = 0;
+                    addLogMessage(`¡Has avanzado a la etapa ${newState.stage}!`, 'text-purple-400 font-bold');
+                } else {
+                    newState.monstersKilledInStage++;
+                }
+
                 addLogMessage(`${prev.monster.name} ha sido derrotado!`, 'text-red-500');
                 
                 let goldGained = prev.monster.goldReward;
@@ -377,8 +408,7 @@ export default function App() {
 
                 addLogMessage(`+${goldGained} Oro, +${prev.monster.xpReward} XP`, 'text-yellow-300');
                 
-                // NUEVO: Generar y añadir botín
-                const loot = generateLoot(newState.stage);
+                const loot = generateLoot(newState.stage, prev.isBossFight);
                 if (loot) {
                     newState.inventory = [...newState.inventory, loot];
                     addLogMessage(`¡Has encontrado ${loot.name}!`, ITEM_RARITIES[loot.rarity].color);
@@ -386,22 +416,15 @@ export default function App() {
 
                 newState.hero.gold += goldGained;
                 newState.hero.xp += prev.monster.xpReward;
-                newState.monstersKilledInStage++;
                 
                 if (newState.hero.xp >= newState.hero.xpNeeded) {
                     newState.hero.level++;
                     newState.hero.xp -= newState.hero.xpNeeded;
                     newState.hero.xpNeeded = Math.round(newState.hero.xpNeeded * 1.5);
                     newState.hero.maxHp += 20;
-                    newState.hero.hp = totalStats.maxHp; // Cura al máximo al subir de nivel
+                    newState.hero.hp = totalStats.maxHp;
                     newState.hero.damage += 5;
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newState.hero.level}.`, 'text-blue-400 font-bold');
-                }
-
-                if (newState.monstersKilledInStage >= newState.monstersPerStage) {
-                    newState.stage++;
-                    newState.monstersKilledInStage = 0;
-                    addLogMessage(`¡Has avanzado a la etapa ${newState.stage}!`, 'text-purple-400 font-bold');
                 }
             }
             return newState;
@@ -439,7 +462,6 @@ export default function App() {
         });
     }, [addLogMessage, createFloatingText, totalStats]);
 
-    // NUEVO: Funciones para equipar y desequipar objetos
     const equipItem = useCallback((itemId) => {
         setGameState(prev => {
             const itemToEquip = prev.inventory.find(item => item.id === itemId);
@@ -469,10 +491,12 @@ export default function App() {
 
     useEffect(() => {
         const gameInterval = setInterval(() => {
-            heroAttack();
+            if (!gameState.isBossFight || gameState.bossTimer > 0) {
+                heroAttack();
+            }
         }, 1000);
         return () => clearInterval(gameInterval);
-    }, [heroAttack]);
+    }, [heroAttack, gameState.isBossFight, gameState.bossTimer]);
     
     useEffect(() => {
         const cooldownInterval = setInterval(() => {
@@ -491,11 +515,42 @@ export default function App() {
         return () => clearInterval(cooldownInterval);
     }, []);
 
+    // MODIFICADO: Efecto para manejar la lógica de aparición de monstruos y jefes
     useEffect(() => {
         if (gameState.monster.hp <= 0) {
-            setTimeout(spawnNewMonster, 500);
+            const timeout = setTimeout(() => {
+                if (gameState.isBossFight) {
+                    spawnNewMonster(); // Si el jefe fue derrotado, aparece un monstruo normal
+                } else if (gameState.monstersKilledInStage >= gameState.monstersPerStage) {
+                    spawnBoss(); // Si se alcanza el límite de la etapa, aparece un jefe
+                } else {
+                    spawnNewMonster(); // Si no, aparece otro monstruo normal
+                }
+            }, 500);
+            return () => clearTimeout(timeout);
         }
-    }, [gameState.monster.hp, spawnNewMonster]);
+    }, [gameState.monster.hp, gameState.monstersKilledInStage, gameState.monstersPerStage, gameState.isBossFight, spawnNewMonster, spawnBoss]);
+    
+    // NUEVO: Efecto para el temporizador del jefe
+    useEffect(() => {
+        if (!gameState.isBossFight) return;
+
+        const timerInterval = setInterval(() => {
+            setGameState(prev => {
+                if (prev.bossTimer > 0) {
+                    return { ...prev, bossTimer: prev.bossTimer - 1 };
+                } else {
+                    // El tiempo se acabó
+                    addLogMessage('¡Tiempo agotado! El jefe se ha recuperado.', 'text-red-500 font-bold');
+                    const newMonster = { ...prev.monster, hp: prev.monster.maxHp };
+                    return { ...prev, monster: newMonster, bossTimer: 30 }; // Reinicia el jefe
+                }
+            });
+        }, 1000);
+
+        return () => clearInterval(timerInterval);
+    }, [gameState.isBossFight, addLogMessage]);
+
 
     const handleUpgrade = (upgradeType) => {
         setGameState(prev => {
@@ -544,13 +599,18 @@ export default function App() {
                        <SkillsPanel skills={gameState.skills} onUseSkill={useSkill} />
                     </div>
                     <div className="md:col-span-2">
-                       <CombatPanel monster={gameState.monster} stage={gameState.stage} combatLog={gameState.combatLog} />
+                       <CombatPanel 
+                           monster={gameState.monster} 
+                           stage={gameState.stage} 
+                           combatLog={gameState.combatLog}
+                           isBossFight={gameState.isBossFight}
+                           bossTimer={gameState.bossTimer}
+                       />
                     </div>
                     <div className="flex flex-col gap-6">
                         <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
                     </div>
                 </div>
-                {/* NUEVO: Fila para el inventario */}
                 <div className="mt-6">
                     <InventoryPanel 
                         equipment={gameState.hero.equipment} 
