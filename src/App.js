@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // --- Estado Inicial del Juego ---
+// Se ha añadido un objeto 'skills' para manejar el estado de las habilidades.
 const initialGameState = {
     hero: {
         level: 1,
@@ -26,6 +27,16 @@ const initialGameState = {
         health: { cost: 15, increase: 10, level: 0 },
         critChance: { cost: 50, increase: 0.01, level: 0 },
     },
+    // NUEVO: Estado para las habilidades
+    skills: {
+        powerfulStrike: { name: 'Golpe Poderoso', cooldown: 10, remaining: 0, description: 'Inflige 300% de daño.' },
+        quickHeal: { name: 'Curación Rápida', cooldown: 30, remaining: 0, description: 'Cura 25% de la vida máxima.' },
+        goldRush: { name: 'Lluvia de Oro', cooldown: 60, remaining: 0, description: 'Duplica el oro del próximo monstruo.' },
+    },
+    effects: {
+        powerfulStrikeActive: false,
+        goldRushActive: false,
+    },
     stage: 1,
     monstersKilledInStage: 0,
     monstersPerStage: 10,
@@ -36,7 +47,7 @@ const initialGameState = {
 
 // --- Componentes de la UI ---
 
-// Panel del Héroe
+// Panel del Héroe (sin cambios)
 const HeroPanel = ({ hero }) => {
     const xpPercentage = (hero.xp / hero.xpNeeded) * 100;
     return (
@@ -59,13 +70,12 @@ const HeroPanel = ({ hero }) => {
     );
 };
 
-// Panel de Combate
+// Panel de Combate (sin cambios)
 const CombatPanel = ({ monster, stage, combatLog }) => {
     const hpPercentage = (monster.hp / monster.maxHp) * 100;
     const logRef = useRef(null);
 
     useEffect(() => {
-        // Auto-scroll del log de combate
         if (logRef.current) {
             logRef.current.scrollTop = logRef.current.scrollHeight;
         }
@@ -95,7 +105,7 @@ const CombatPanel = ({ monster, stage, combatLog }) => {
     );
 };
 
-// Panel de Mejoras
+// Panel de Mejoras (sin cambios)
 const UpgradeButton = ({ onClick, disabled, children }) => (
     <button onClick={onClick} disabled={disabled} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed">
         {children}
@@ -125,7 +135,46 @@ const UpgradesPanel = ({ gold, upgrades, onUpgrade }) => (
     </div>
 );
 
-// Componente para el texto flotante
+// NUEVO: Componente para un botón de habilidad individual
+const SkillButton = ({ skill, onClick }) => {
+    const onCooldown = skill.remaining > 0;
+    const cooldownPercentage = (skill.cooldown - skill.remaining) / skill.cooldown * 100;
+
+    return (
+        <button
+            onClick={onClick}
+            disabled={onCooldown}
+            className="relative w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed overflow-hidden"
+        >
+            {onCooldown && (
+                <div
+                    className="absolute top-0 left-0 h-full bg-purple-900 opacity-75"
+                    style={{ width: `${cooldownPercentage}%` }}
+                ></div>
+            )}
+            <span className="relative z-10">
+                {skill.name}
+                <br />
+                <span className="text-sm font-normal">{onCooldown ? `${skill.remaining}s` : skill.description}</span>
+            </span>
+        </button>
+    );
+};
+
+// NUEVO: Panel de Habilidades
+const SkillsPanel = ({ skills, onUseSkill }) => (
+    <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
+        <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Habilidades</h2>
+        <div className="space-y-4">
+            <SkillButton skill={skills.powerfulStrike} onClick={() => onUseSkill('powerfulStrike')} />
+            <SkillButton skill={skills.quickHeal} onClick={() => onUseSkill('quickHeal')} />
+            <SkillButton skill={skills.goldRush} onClick={() => onUseSkill('goldRush')} />
+        </div>
+    </div>
+);
+
+
+// Componente para el texto flotante (sin cambios)
 const FloatingText = ({ text, x, y, color, id }) => {
     const style = {
         left: `${x}px`,
@@ -146,16 +195,16 @@ export default function App() {
     const addLogMessage = useCallback((text, color) => {
         setGameState(prev => ({
             ...prev,
-            combatLog: [...prev.combatLog.slice(-10), { text, color }], // Mantener solo los últimos 11 mensajes
+            combatLog: [...prev.combatLog.slice(-10), { text, color }],
         }));
     }, []);
 
-    const createFloatingText = useCallback((text, color) => {
+    const createFloatingText = useCallback((text, color, customYOffset = 0) => {
         const container = document.getElementById('monster-art-container');
         if (!container) return;
         const rect = container.getBoundingClientRect();
         const x = rect.left + rect.width / 2 + (Math.random() - 0.5) * 50;
-        const y = rect.top + rect.height / 2 + (Math.random() - 0.5) * 30;
+        const y = rect.top + rect.height / 2 + (Math.random() - 0.5) * 30 + customYOffset;
         const id = Date.now() + Math.random();
 
         setGameState(prev => ({
@@ -197,7 +246,12 @@ export default function App() {
             let damageDealt = prev.hero.damage;
             let isCrit = Math.random() < prev.hero.critChance;
             
-            if (isCrit) {
+            // MODIFICADO: Aplicar efecto de Golpe Poderoso
+            if (prev.effects.powerfulStrikeActive) {
+                damageDealt *= 3;
+                addLogMessage(`¡GOLPE PODEROSO! Héroe ataca por ${damageDealt} de daño.`, 'text-orange-500 font-bold');
+                createFloatingText(damageDealt, 'orange');
+            } else if (isCrit) {
                 damageDealt = Math.round(damageDealt * prev.hero.critMultiplier);
                 addLogMessage(`¡GOLPE CRÍTICO! Héroe ataca por ${damageDealt} de daño.`, 'text-yellow-400');
                 createFloatingText(damageDealt, 'yellow');
@@ -207,17 +261,29 @@ export default function App() {
             }
 
             const newMonsterHp = prev.monster.hp - damageDealt;
-            let newState = { ...prev, monster: { ...prev.monster, hp: newMonsterHp } };
+            let newState = { 
+                ...prev, 
+                monster: { ...prev.monster, hp: newMonsterHp },
+                effects: { ...prev.effects, powerfulStrikeActive: false } // Desactivar después de usar
+            };
 
             if (newMonsterHp <= 0) {
                 addLogMessage(`${prev.monster.name} ha sido derrotado!`, 'text-red-500');
-                addLogMessage(`+${prev.monster.goldReward} Oro, +${prev.monster.xpReward} XP`, 'text-yellow-300');
                 
-                newState.hero.gold += prev.monster.goldReward;
+                // MODIFICADO: Aplicar efecto de Lluvia de Oro
+                let goldGained = prev.monster.goldReward;
+                if (prev.effects.goldRushActive) {
+                    goldGained *= 2;
+                    addLogMessage(`¡Lluvia de Oro! Recompensa duplicada.`, 'text-yellow-400 font-bold');
+                    newState.effects.goldRushActive = false; // Desactivar después de usar
+                }
+
+                addLogMessage(`+${goldGained} Oro, +${prev.monster.xpReward} XP`, 'text-yellow-300');
+                
+                newState.hero.gold += goldGained;
                 newState.hero.xp += prev.monster.xpReward;
                 newState.monstersKilledInStage++;
                 
-                // Level Up Check
                 if (newState.hero.xp >= newState.hero.xpNeeded) {
                     newState.hero.level++;
                     newState.hero.xp -= newState.hero.xpNeeded;
@@ -228,7 +294,6 @@ export default function App() {
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newState.hero.level}.`, 'text-blue-400 font-bold');
                 }
 
-                // Stage Advance Check
                 if (newState.monstersKilledInStage >= newState.monstersPerStage) {
                     newState.stage++;
                     newState.monstersKilledInStage = 0;
@@ -238,6 +303,40 @@ export default function App() {
             return newState;
         });
     }, [addLogMessage, createFloatingText]);
+    
+    // NUEVO: Lógica para usar habilidades
+    const useSkill = useCallback((skillId) => {
+        setGameState(prev => {
+            const skill = prev.skills[skillId];
+            if (skill.remaining > 0) return prev; // Ya está en enfriamiento
+
+            let newState = { ...prev };
+            
+            switch (skillId) {
+                case 'powerfulStrike':
+                    newState.effects.powerfulStrikeActive = true;
+                    addLogMessage('¡Preparando un Golpe Poderoso!', 'text-orange-400');
+                    break;
+                case 'quickHeal':
+                    const healAmount = Math.round(prev.hero.maxHp * 0.25);
+                    newState.hero.hp = Math.min(prev.hero.maxHp, prev.hero.hp + healAmount);
+                    addLogMessage(`¡Te curas por ${healAmount} HP!`, 'text-teal-400');
+                    createFloatingText(`+${healAmount} HP`, 'lightgreen', -30);
+                    break;
+                case 'goldRush':
+                    newState.effects.goldRushActive = true;
+                    addLogMessage('¡El próximo monstruo soltará el doble de oro!', 'text-yellow-400');
+                    break;
+                default:
+                    return prev;
+            }
+
+            // Poner la habilidad en enfriamiento
+            newState.skills[skillId].remaining = newState.skills[skillId].cooldown;
+            return newState;
+        });
+    }, [addLogMessage, createFloatingText]);
+
 
     // Bucle principal del juego
     useEffect(() => {
@@ -246,11 +345,28 @@ export default function App() {
         }, 1000);
         return () => clearInterval(gameInterval);
     }, [heroAttack]);
+    
+    // NUEVO: Bucle para los enfriamientos de habilidades
+    useEffect(() => {
+        const cooldownInterval = setInterval(() => {
+            setGameState(prev => {
+                const newSkills = { ...prev.skills };
+                let changed = false;
+                for (const skillId in newSkills) {
+                    if (newSkills[skillId].remaining > 0) {
+                        newSkills[skillId].remaining--;
+                        changed = true;
+                    }
+                }
+                return changed ? { ...prev, skills: newSkills } : prev;
+            });
+        }, 1000);
+        return () => clearInterval(cooldownInterval);
+    }, []);
 
-    // Efecto para invocar un nuevo monstruo cuando el actual es derrotado
     useEffect(() => {
         if (gameState.monster.hp <= 0) {
-            setTimeout(spawnNewMonster, 500); // Pequeño retraso antes de que aparezca el siguiente
+            setTimeout(spawnNewMonster, 500);
         }
     }, [gameState.monster.hp, spawnNewMonster]);
 
@@ -278,7 +394,6 @@ export default function App() {
         });
     };
     
-    // Estilos para el texto flotante
     const floatUpAnimation = `@keyframes floatUp {
         from { opacity: 1; transform: translateY(0); }
         to { opacity: 0; transform: translateY(-50px); }
@@ -294,11 +409,17 @@ export default function App() {
                 <FloatingText key={ft.id} {...ft} />
             ))}
 
-            <div className="container mx-auto p-4 max-w-4xl w-full">
+            <div className="container mx-auto p-4 max-w-6xl w-full">
                 <h1 className="text-4xl font-bold text-center mb-6 text-yellow-400">Aventura Idle con React</h1>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <HeroPanel hero={gameState.hero} />
-                    <CombatPanel monster={gameState.monster} stage={gameState.stage} combatLog={gameState.combatLog} />
+                {/* MODIFICADO: Cambiado a una cuadrícula de 4 columnas y reorganizado */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="flex flex-col gap-6">
+                       <HeroPanel hero={gameState.hero} />
+                       <SkillsPanel skills={gameState.skills} onUseSkill={useSkill} />
+                    </div>
+                    <div className="md:col-span-2">
+                       <CombatPanel monster={gameState.monster} stage={gameState.stage} combatLog={gameState.combatLog} />
+                    </div>
                     <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
                 </div>
             </div>
