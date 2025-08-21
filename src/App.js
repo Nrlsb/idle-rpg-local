@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
 // --- Constantes del Juego ---
 const ITEM_RARITIES = {
-    common: { name: 'Común', color: 'text-gray-300', multiplier: 1, dismantle: { scrap: 1 } },
-    rare: { name: 'Raro', color: 'text-blue-400', multiplier: 1.5, dismantle: { scrap: 3, essence: 1 } },
-    epic: { name: 'Épico', color: 'text-purple-500', multiplier: 2.5, dismantle: { scrap: 5, essence: 3 } },
+    common: { name: 'Común', color: 'text-gray-300', multiplier: 1, dismantle: { scrap: 1 }, sellValue: 5 },
+    rare: { name: 'Raro', color: 'text-blue-400', multiplier: 1.5, dismantle: { scrap: 3, essence: 1 }, sellValue: 20 },
+    epic: { name: 'Épico', color: 'text-purple-500', multiplier: 2.5, dismantle: { scrap: 5, essence: 3 }, sellValue: 100 },
 };
 
 const ITEM_TEMPLATES = {
@@ -13,7 +13,6 @@ const ITEM_TEMPLATES = {
     amulet: { name: 'Amuleto', icon: '💎', stat: 'critChance', baseValue: 0.01 },
 };
 
-// --- NUEVAS CONSTANTES DE MATERIALES ---
 const MATERIALS = {
     scrap: { name: 'Fragmentos de Chatarra', icon: '⚙️' },
     essence: { name: 'Esencia Mágica', icon: '✨' },
@@ -31,7 +30,7 @@ const initialHeroState = {
     xp: 0,
     xpNeeded: 100,
     skillPoints: 0,
-    materials: { // NUEVO: Materiales del jugador
+    materials: {
         scrap: 0,
         essence: 0,
     },
@@ -223,7 +222,7 @@ const SkillsPanel = ({ skills, onUseSkill }) => (
     </div>
 );
 
-const ItemCard = ({ item, onEquip, onUnequip, onDismantle, isEquipped }) => {
+const ItemCard = ({ item, onEquip, onUnequip, onDismantle, onSell }) => {
     if (!item) {
         return <div className="bg-gray-700 p-2 rounded-lg text-center text-gray-400 h-full flex items-center justify-center">Vacío</div>;
     }
@@ -234,27 +233,28 @@ const ItemCard = ({ item, onEquip, onUnequip, onDismantle, isEquipped }) => {
                 <p className={`font-bold ${rarity.color}`}>{item.icon} {item.name} {item.upgradeLevel > 0 && `+${item.upgradeLevel}`}</p>
                 <p className="text-sm">+ {item.stat === 'critChance' ? (item.value * 100).toFixed(1) + '%' : item.value.toFixed(0)} {item.stat === 'maxHp' ? 'HP' : item.stat === 'damage' ? 'Daño' : 'Crit'}</p>
             </div>
-            <div className="flex gap-1 mt-2">
+            <div className="grid grid-cols-2 gap-1 mt-2">
                 {onEquip && <button onClick={onEquip} className="w-full bg-blue-600 hover:bg-blue-700 text-xs py-1 rounded">Equipar</button>}
-                {onUnequip && <button onClick={onUnequip} className="w-full bg-gray-600 hover:bg-gray-700 text-xs py-1 rounded">Quitar</button>}
-                {onDismantle && <button onClick={onDismantle} className="w-full bg-red-600 hover:bg-red-700 text-xs py-1 rounded">Desmantelar</button>}
+                {onUnequip && <button onClick={onUnequip} className="w-full bg-gray-600 hover:bg-gray-700 text-xs py-1 rounded col-span-2">Quitar</button>}
+                {onSell && <button onClick={onSell} className="w-full bg-green-600 hover:bg-green-700 text-xs py-1 rounded">Vender</button>}
+                {onDismantle && <button onClick={onDismantle} className="w-full bg-red-600 hover:bg-red-700 text-xs py-1 rounded">Desmant.</button>}
             </div>
         </div>
     );
 };
 
-const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip, onDismantle }) => (
+const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip, onDismantle, onSell }) => (
     <div className="bg-gray-800 p-6 rounded-lg shadow-lg h-full">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Equipamiento</h2>
         <div className="grid grid-cols-3 gap-4 mb-4">
-            <ItemCard item={equipment.weapon} onUnequip={equipment.weapon ? () => onUnequip('weapon') : null} isEquipped={true} />
-            <ItemCard item={equipment.shield} onUnequip={equipment.shield ? () => onUnequip('shield') : null} isEquipped={true} />
-            <ItemCard item={equipment.amulet} onUnequip={equipment.amulet ? () => onUnequip('amulet') : null} isEquipped={true} />
+            <ItemCard item={equipment.weapon} onUnequip={equipment.weapon ? () => onUnequip('weapon') : null} />
+            <ItemCard item={equipment.shield} onUnequip={equipment.shield ? () => onUnequip('shield') : null} />
+            <ItemCard item={equipment.amulet} onUnequip={equipment.amulet ? () => onUnequip('amulet') : null} />
         </div>
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Inventario ({inventory.length})</h2>
         <div className="grid grid-cols-4 gap-2 h-48 overflow-y-auto">
             {inventory.map(item => (
-                <ItemCard key={item.id} item={item} onEquip={() => onEquip(item.id)} onDismantle={() => onDismantle(item.id)} />
+                <ItemCard key={item.id} item={item} onEquip={() => onEquip(item.id)} onDismantle={() => onDismantle(item.id)} onSell={() => onSell(item.id)} />
             ))}
         </div>
     </div>
@@ -319,7 +319,6 @@ const PassiveSkillsPanel = ({ skillPoints, skills, onUpgrade }) => (
     </div>
 );
 
-// --- NUEVO PANEL: Forja ---
 const CraftingPanel = ({ hero, onUpgradeItem }) => {
     const getUpgradeCost = (item) => {
         if (!item) return null;
@@ -462,21 +461,37 @@ export default function App() {
         }, 1000);
     }, []);
 
-    const generateMaterialDrop = useCallback((stage, isBoss = false) => {
-        const dropChance = isBoss ? 1.0 : 0.7;
+    const generateLoot = useCallback((stage, isBoss = false) => {
+        const dropChance = isBoss ? 0.8 : 0.2;
         if (Math.random() > dropChance) return null;
 
-        const drops = {};
-        const scrapAmount = isBoss ? 5 + Math.floor(stage / 2) : 1 + Math.floor(Math.random() * 2);
-        drops.scrap = scrapAmount;
-        
-        const essenceChance = isBoss ? 0.8 : 0.1;
-        if (Math.random() < essenceChance) {
-            const essenceAmount = isBoss ? 2 + Math.floor(stage / 5) : 1;
-            drops.essence = essenceAmount;
+        const rarityRoll = Math.random();
+        let rarity;
+        if (isBoss) {
+            if (rarityRoll < 0.2) rarity = 'epic';
+            else if (rarityRoll < 0.6) rarity = 'rare';
+            else rarity = 'common';
+        } else {
+            if (rarityRoll < 0.05) rarity = 'epic';
+            else if (rarityRoll < 0.25) rarity = 'rare';
+            else rarity = 'common';
         }
 
-        return drops;
+        const itemTypes = Object.keys(ITEM_TEMPLATES);
+        const itemTypeKey = itemTypes[Math.floor(Math.random() * itemTypes.length)];
+        const template = ITEM_TEMPLATES[itemTypeKey];
+        const value = template.baseValue * ITEM_RARITIES[rarity].multiplier * (1 + (stage - 1) * 0.1);
+
+        return {
+            id: Date.now() + Math.random(),
+            name: `${template.name} ${ITEM_RARITIES[rarity].name}`,
+            icon: template.icon,
+            type: itemTypeKey,
+            stat: template.stat,
+            value: value,
+            rarity: rarity,
+            upgradeLevel: 0, // NUEVO: Nivel de mejora inicial
+        };
     }, []);
 
     const spawnBoss = useCallback(() => {
@@ -571,18 +586,10 @@ export default function App() {
 
                 addLogMessage(`+${goldGained} Oro, +${prev.monster.xpReward} XP`, 'text-yellow-300');
                 
-                // NUEVO: Generar drop de materiales
-                const materialDrops = generateMaterialDrop(newState.stage, prev.isBossFight);
-                if (materialDrops) {
-                    let dropMessage = 'Materiales encontrados: ';
-                    let first = true;
-                    for(const mat in materialDrops) {
-                        if (!first) dropMessage += ', ';
-                        newState.hero.materials[mat] = (newState.hero.materials[mat] || 0) + materialDrops[mat];
-                        dropMessage += `${materialDrops[mat]} ${MATERIALS[mat].icon}`;
-                        first = false;
-                    }
-                    addLogMessage(dropMessage, 'text-cyan-400');
+                const loot = generateLoot(newState.stage, prev.isBossFight);
+                if (loot) {
+                    newState.inventory = [...newState.inventory, loot];
+                    addLogMessage(`¡Has encontrado ${loot.name}!`, ITEM_RARITIES[loot.rarity].color);
                 }
 
                 newState.hero.gold += goldGained;
@@ -616,7 +623,7 @@ export default function App() {
             }
             return newState;
         });
-    }, [addLogMessage, createFloatingText, generateMaterialDrop, totalStats]);
+    }, [addLogMessage, createFloatingText, generateLoot, totalStats]);
     
     const useSkill = useCallback((skillId) => {
         setGameState(prev => {
@@ -702,6 +709,26 @@ export default function App() {
         });
     }, [addLogMessage]);
 
+    // NUEVO: Función para vender objetos
+    const sellItem = useCallback((itemId) => {
+        setGameState(prev => {
+            const itemToSell = prev.inventory.find(item => item.id === itemId);
+            if (!itemToSell) return prev;
+
+            const newInventory = prev.inventory.filter(item => item.id !== itemId);
+            
+            const baseValue = ITEM_RARITIES[itemToSell.rarity].sellValue;
+            const finalValue = Math.round(baseValue * (1 + (itemToSell.upgradeLevel || 0) * 0.5));
+
+            const newHero = { ...prev.hero, gold: prev.hero.gold + finalValue };
+            
+            addLogMessage(`Vendido ${itemToSell.name} por ${finalValue} oro.`, 'text-yellow-300');
+
+            return { ...prev, inventory: newInventory, hero: newHero };
+        });
+    }, [addLogMessage]);
+
+
     const upgradeItem = useCallback((slot) => {
         setGameState(prev => {
             const item = prev.hero.equipment[slot];
@@ -728,7 +755,7 @@ export default function App() {
             };
 
             const template = ITEM_TEMPLATES[item.type];
-            const statIncrease = template.baseValue * ITEM_RARITIES[item.rarity].multiplier * 0.1; // 10% del valor base por nivel
+            const statIncrease = template.baseValue * ITEM_RARITIES[item.rarity].multiplier * 0.1;
 
             const upgradedItem = {
                 ...item,
@@ -1020,6 +1047,7 @@ export default function App() {
                             onEquip={equipItem}
                             onUnequip={unequipItem}
                             onDismantle={dismantleItem}
+                            onSell={sellItem}
                         />
                     </div>
                     {/* Columna Derecha */}
