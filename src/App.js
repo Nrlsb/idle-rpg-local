@@ -93,6 +93,7 @@ const initialGameState = {
     bossArt: ['😈', '🤡', '👹', '🧛', '🧟', '🧞', '🦍', '🐊', '🦖', '🐙'],
     combatLog: [],
     floatingTexts: [],
+    toasts: [], // NUEVO: Estado para notificaciones
     isBossFight: false,
     bossTimer: 30,
     prestige: {
@@ -113,6 +114,51 @@ const initialGameState = {
 };
 
 // --- COMPONENTES DE UI ---
+
+// NUEVO: Componente para una notificación individual
+const Toast = ({ message, type, onDismiss }) => {
+    const [exiting, setExiting] = useState(false);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setExiting(true);
+            setTimeout(onDismiss, 500); // Coincide con la duración de la animación de salida
+        }, 5000);
+
+        return () => clearTimeout(timer);
+    }, [onDismiss]);
+
+    const handleDismiss = () => {
+        setExiting(true);
+        setTimeout(onDismiss, 500);
+    };
+
+    const typeStyles = {
+        info: 'bg-blue-500 border-blue-400',
+        success: 'bg-green-500 border-green-400',
+        warning: 'bg-yellow-500 border-yellow-400',
+        prestige: 'bg-purple-600 border-purple-500',
+        'loot-raro': 'bg-blue-600 border-blue-400',
+        'loot-épico': 'bg-purple-700 border-purple-500',
+    };
+
+    return (
+        <div className={`relative p-4 rounded-lg shadow-lg text-white mb-2 border-l-4 ${typeStyles[type] || typeStyles.info} ${exiting ? 'animate-toast-out' : 'animate-toast-in'}`}>
+            {message}
+            <button onClick={handleDismiss} className="absolute top-1 right-2 text-white font-bold">&times;</button>
+        </div>
+    );
+};
+
+// NUEVO: Componente para contener todas las notificaciones
+const ToastContainer = ({ toasts, onDismiss }) => (
+    <div className="fixed top-4 right-4 z-50 w-80">
+        {toasts.map(toast => (
+            <Toast key={toast.id} {...toast} onDismiss={() => onDismiss(toast.id)} />
+        ))}
+    </div>
+);
+
 
 const HeroPanel = ({ hero, stats, prestige, activePet }) => {
     const xpPercentage = (hero.xp / hero.xpNeeded) * 100;
@@ -585,6 +631,22 @@ const useGameLogic = (audioManager) => {
         return stats;
     }, [gameState.hero, gameState.prestigeUpgrades, gameState.passiveSkills, gameState.pets]);
 
+    // NUEVO: Función para añadir notificaciones
+    const addToast = useCallback((message, type = 'info') => {
+        const id = Date.now() + Math.random();
+        setGameState(prev => ({
+            ...prev,
+            toasts: [...prev.toasts, { id, message, type }],
+        }));
+    }, []);
+
+    // NUEVO: Función para descartar notificaciones
+    const dismissToast = useCallback((id) => {
+        setGameState(prev => ({
+            ...prev,
+            toasts: prev.toasts.filter(t => t.id !== id),
+        }));
+    }, []);
 
     const addLogMessage = useCallback((text, color) => {
         setGameState(prev => ({
@@ -660,9 +722,10 @@ const useGameLogic = (audioManager) => {
                 art: prev.bossArt[Math.floor(Math.random() * prev.bossArt.length)],
             };
             addLogMessage(`¡Un JEFE ha aparecido: ${boss.name}!`, 'text-yellow-400 font-bold');
+            addToast(`¡Un JEFE ha aparecido!`, 'warning'); // NUEVO: Toast de jefe
             return { ...prev, monster: boss, isBossFight: true, bossTimer: 30 };
         });
-    }, [addLogMessage]);
+    }, [addLogMessage, addToast]);
 
     const spawnNewMonster = useCallback(() => {
         setGameState(prev => {
@@ -750,7 +813,12 @@ const useGameLogic = (audioManager) => {
                 const loot = generateLoot(newState.stage, prev.isBossFight);
                 if (loot) {
                     newState.inventory = [...newState.inventory, loot];
-                    addLogMessage(`¡Has encontrado ${loot.name}!`, ITEM_RARITIES[loot.rarity].color);
+                    const rarityInfo = ITEM_RARITIES[loot.rarity];
+                    addLogMessage(`¡Has encontrado ${loot.name}!`, rarityInfo.color);
+                    // NUEVO: Toast para botín raro/épico
+                    if (loot.rarity === 'rare' || loot.rarity === 'epic') {
+                        addToast(`¡Botín ${rarityInfo.name}! ${loot.icon} ${loot.name}`, `loot-${loot.rarity}`);
+                    }
                     audioManager?.playSound('gold');
                 }
 
@@ -770,6 +838,7 @@ const useGameLogic = (audioManager) => {
                     newDamage += 5;
                     newSkillPoints++;
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newLevel}.`, 'text-blue-400 font-bold');
+                    addToast(`¡Nivel ${newLevel} alcanzado!`, 'success'); // NUEVO: Toast de subida de nivel
                     audioManager?.playSound('levelUp');
                 }
                 
@@ -786,7 +855,7 @@ const useGameLogic = (audioManager) => {
             }
             return newState;
         });
-    }, [addLogMessage, createFloatingText, generateLoot, totalStats, audioManager]);
+    }, [addLogMessage, createFloatingText, generateLoot, totalStats, audioManager, addToast]);
     
     const useSkill = useCallback((skillId) => {
         setGameState(prev => {
@@ -943,6 +1012,7 @@ const useGameLogic = (audioManager) => {
 
             const relicsGained = Math.floor(prev.stage / 5) + prev.hero.level;
             addLogMessage(`¡RENACIMIENTO! Has ganado ${relicsGained} reliquias.`, 'text-yellow-200 font-bold text-lg');
+            addToast(`¡Renacimiento! +${relicsGained} Reliquias`, 'prestige'); // NUEVO: Toast de prestigio
 
             return {
                 ...prev,
@@ -960,7 +1030,7 @@ const useGameLogic = (audioManager) => {
                 }
             };
         });
-    }, [addLogMessage]);
+    }, [addLogMessage, addToast]);
 
     const handlePrestigeUpgrade = useCallback((upgradeId) => {
         setGameState(prev => {
@@ -1148,6 +1218,7 @@ const useGameLogic = (audioManager) => {
                 passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills },
                 pets: { ...initialGameState.pets, ...loadedState.pets },
                 settings: { ...initialGameState.settings, ...loadedState.settings },
+                toasts: [], // Asegurarse de que los toasts no se carguen
             };
 
             const today = new Date().toISOString().split('T')[0];
@@ -1223,6 +1294,7 @@ const useGameLogic = (audioManager) => {
             handleToggleMusic,
             handleToggleSfx,
             clearOfflineGains,
+            dismissToast, // Exportar el handler
         }
     };
 };
@@ -1233,7 +1305,6 @@ export default function App() {
     const [isAudioReady, setIsAudioReady] = useState(false);
     const [activeTab, setActiveTab] = useState('upgrades');
 
-    // CORRECCIÓN: Se pasa solo `settings` al hook de audio
     const audioManager = useAudioManager(initialGameState.settings); 
 
     const {
@@ -1261,6 +1332,12 @@ export default function App() {
         .shake { animation: shake 0.2s ease-in-out; }
         @keyframes fadeOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.5); } }
         .fadeOut { animation: fadeOut 0.5s ease-out forwards; }
+        
+        /* NUEVO: Animaciones para Toasts */
+        @keyframes toast-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .animate-toast-in { animation: toast-in 0.5s ease-out forwards; }
+        @keyframes toast-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+        .animate-toast-out { animation: toast-out 0.5s ease-in forwards; }
     `;
 
     const TabButton = ({ tabName, children }) => (
@@ -1295,6 +1372,9 @@ export default function App() {
 
             {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={handlers.clearOfflineGains} />}
             {dailyReward && <DailyRewardModal reward={dailyReward} onClose={handlers.handleClaimDailyReward} />}
+            
+            {/* NUEVO: Renderizar el contenedor de toasts */}
+            <ToastContainer toasts={gameState.toasts} onDismiss={handlers.dismissToast} />
 
             {gameState.floatingTexts.map(ft => (
                 <FloatingText key={ft.id} {...ft} />
@@ -1339,11 +1419,16 @@ export default function App() {
                         </div>
 
                         {activeTab === 'upgrades' && <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handlers.handleUpgrade} />}
-                        {activeTab === 'prestige' && <PrestigeUpgradesPanel 
-                            relics={gameState.prestige.relics}
-                            upgrades={gameState.prestigeUpgrades}
-                            onUpgrade={handlers.handlePrestigeUpgrade}
-                        />}
+                        {activeTab === 'prestige' && 
+                            <>
+                                <PrestigePanel hero={gameState.hero} prestige={gameState.prestige} onPrestige={handlers.handlePrestige} />
+                                <PrestigeUpgradesPanel 
+                                    relics={gameState.prestige.relics}
+                                    upgrades={gameState.prestigeUpgrades}
+                                    onUpgrade={handlers.handlePrestigeUpgrade}
+                                />
+                            </>
+                        }
                         {activeTab === 'passives' && <PassiveSkillsPanel
                             skillPoints={gameState.hero.skillPoints}
                             skills={gameState.passiveSkills}
