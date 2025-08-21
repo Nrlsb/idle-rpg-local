@@ -18,6 +18,13 @@ const MATERIALS = {
     essence: { name: 'Esencia Mágica', icon: '✨' },
 };
 
+// --- NUEVO: Constantes de Compañeros ---
+const PETS = {
+    wolf: { id: 'wolf', name: 'Lobo Fiel', icon: '🐺', bonusStat: 'damage', bonusPerLevel: 0.05, description: '+5% de Daño por nivel' },
+    golem: { id: 'golem', name: 'Gólem de Oro', icon: '🗿', bonusStat: 'gold', bonusPerLevel: 0.03, description: '+3% de Oro por nivel' },
+    sprite: { id: 'sprite', name: 'Hada de la Suerte', icon: '🧚', bonusStat: 'critChance', bonusPerLevel: 0.005, description: '+0.5% Prob. Crítico por nivel' },
+};
+
 // --- Estado Inicial del Juego ---
 const initialHeroState = {
     level: 1,
@@ -67,6 +74,15 @@ const initialGameState = {
         increasedHealth: { name: 'Vitalidad', level: 0, cost: 1, increase: 0.03, description: '+3% Vida Máxima por nivel' },
         fasterCooldowns: { name: 'Presteza', level: 0, cost: 2, increase: 0.01, description: '-1% Enfriamiento de Habilidades por nivel' }
     },
+    pets: { // NUEVO: Estado de Compañeros
+        owned: ['wolf'], // Empieza con el lobo
+        activePetId: 'wolf',
+        levels: {
+            wolf: 1,
+            golem: 0,
+            sprite: 0,
+        }
+    },
     effects: {
         powerfulStrikeActive: false,
         goldRushActive: false,
@@ -94,11 +110,12 @@ const initialGameState = {
 
 // --- Componentes de la UI ---
 
-const HeroPanel = ({ hero, stats, prestige }) => {
+const HeroPanel = ({ hero, stats, prestige, activePet }) => {
     const xpPercentage = (hero.xp / hero.xpNeeded) * 100;
     return (
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-            <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Héroe</h2>
+            <h2 className="text-2xl font-semibold mb-2 text-center border-b border-gray-700 pb-2">Héroe</h2>
+            {activePet && <p className="text-center text-lg">{activePet.icon} {activePet.name} <span className="text-yellow-400">Nvl. {hero.petLevel}</span></p>}
             {prestige.level > 0 && <p className="text-center text-yellow-400 font-bold">Prestigio: {prestige.level}</p>}
             <div className="space-y-3 text-lg mt-2">
                 <p><strong>Nivel:</strong> {hero.level}</p>
@@ -368,6 +385,41 @@ const CraftingPanel = ({ hero, onUpgradeItem }) => {
     );
 };
 
+// --- NUEVO PANEL: Compañeros ---
+const PetPanel = ({ pets, gold, onActivate, onLevelUp }) => {
+    const getLevelUpCost = (petId) => 100 * Math.pow(pets.levels[petId] || 1, 2);
+
+    return (
+        <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Compañeros</h2>
+            <div className="space-y-4">
+                {pets.owned.map(petId => {
+                    const pet = PETS[petId];
+                    const level = pets.levels[petId];
+                    const isActive = pets.activePetId === petId;
+                    const cost = getLevelUpCost(petId);
+                    const canAfford = gold >= cost;
+
+                    return (
+                        <div key={petId} className={`p-3 rounded-lg ${isActive ? 'bg-yellow-900/50 border border-yellow-500' : 'bg-gray-700'}`}>
+                            <p className="text-lg font-bold">{pet.icon} {pet.name} (Nvl. {level})</p>
+                            <p className="text-sm">{pet.description}</p>
+                            <div className="flex gap-2 mt-2">
+                                <button onClick={() => onActivate(petId)} disabled={isActive} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded text-sm disabled:bg-gray-500">
+                                    {isActive ? 'Activo' : 'Activar'}
+                                </button>
+                                <button onClick={() => onLevelUp(petId)} disabled={!isActive || !canAfford} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 rounded text-sm disabled:bg-gray-500">
+                                    Subir Nivel ({cost} Oro)
+                                </button>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
 
 const OfflineGainsModal = ({ gains, onClose }) => {
     const formatTime = (seconds) => {
@@ -416,11 +468,24 @@ export default function App() {
         const prestigeDamageBonus = 1 + (gameState.prestigeUpgrades.damageBonus.level * gameState.prestigeUpgrades.damageBonus.increase);
         const passiveDamageBonus = 1 + (gameState.passiveSkills.increasedDamage.level * gameState.passiveSkills.increasedDamage.increase);
         const passiveHealthBonus = 1 + (gameState.passiveSkills.increasedHealth.level * gameState.passiveSkills.increasedHealth.increase);
+        
+        let petDamageBonus = 1;
+        let petCritBonus = 0;
+        const activePet = PETS[gameState.pets.activePetId];
+        if (activePet) {
+            const petLevel = gameState.pets.levels[activePet.id] || 0;
+            if (activePet.bonusStat === 'damage') {
+                petDamageBonus = 1 + (petLevel * activePet.bonusPerLevel);
+            }
+            if (activePet.bonusStat === 'critChance') {
+                petCritBonus = petLevel * activePet.bonusPerLevel;
+            }
+        }
 
         const stats = {
-            damage: gameState.hero.damage * prestigeDamageBonus * passiveDamageBonus,
+            damage: gameState.hero.damage * prestigeDamageBonus * passiveDamageBonus * petDamageBonus,
             maxHp: gameState.hero.maxHp * passiveHealthBonus,
-            critChance: gameState.hero.critChance,
+            critChance: gameState.hero.critChance + petCritBonus,
         };
 
         for (const slot in gameState.hero.equipment) {
@@ -430,7 +495,7 @@ export default function App() {
             }
         }
         return stats;
-    }, [gameState.hero, gameState.prestigeUpgrades, gameState.passiveSkills]);
+    }, [gameState.hero, gameState.prestigeUpgrades, gameState.passiveSkills, gameState.pets]);
 
 
     const addLogMessage = useCallback((text, color) => {
@@ -490,7 +555,7 @@ export default function App() {
             stat: template.stat,
             value: value,
             rarity: rarity,
-            upgradeLevel: 0, // NUEVO: Nivel de mejora inicial
+            upgradeLevel: 0,
         };
     }, []);
 
@@ -575,7 +640,12 @@ export default function App() {
 
                 addLogMessage(`${prev.monster.name} ha sido derrotado!`, 'text-red-500');
                 
-                const goldBonus = 1 + (prev.prestigeUpgrades.goldBonus.level * prev.prestigeUpgrades.goldBonus.increase);
+                let goldBonus = 1 + (prev.prestigeUpgrades.goldBonus.level * prev.prestigeUpgrades.goldBonus.increase);
+                const activePet = PETS[prev.pets.activePetId];
+                if (activePet && activePet.bonusStat === 'gold') {
+                    goldBonus += (prev.pets.levels[activePet.id] || 0) * activePet.bonusPerLevel;
+                }
+
                 let goldGained = Math.round(prev.monster.goldReward * goldBonus);
 
                 if (prev.effects.goldRushActive) {
@@ -709,7 +779,6 @@ export default function App() {
         });
     }, [addLogMessage]);
 
-    // NUEVO: Función para vender objetos
     const sellItem = useCallback((itemId) => {
         setGameState(prev => {
             const itemToSell = prev.inventory.find(item => item.id === itemId);
@@ -834,6 +903,22 @@ export default function App() {
         });
     }, []);
 
+    const handleActivatePet = useCallback((petId) => {
+        setGameState(prev => ({ ...prev, pets: { ...prev.pets, activePetId: petId } }));
+    }, []);
+
+    const handleLevelUpPet = useCallback((petId) => {
+        setGameState(prev => {
+            const level = prev.pets.levels[petId] || 0;
+            const cost = 100 * Math.pow(level + 1, 2);
+            if (prev.hero.gold < cost) return prev;
+
+            const newLevels = { ...prev.pets.levels, [petId]: level + 1 };
+            const newHero = { ...prev.hero, gold: prev.hero.gold - cost };
+            return { ...prev, hero: newHero, pets: { ...prev.pets, levels: newLevels } };
+        });
+    }, []);
+
 
     useEffect(() => {
         const gameInterval = setInterval(() => {
@@ -908,6 +993,7 @@ export default function App() {
                 prestige: { ...initialGameState.prestige, ...loadedState.prestige },
                 prestigeUpgrades: { ...initialGameState.prestigeUpgrades, ...loadedState.prestigeUpgrades },
                 passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills },
+                pets: { ...initialGameState.pets, ...loadedState.pets },
             };
 
 
@@ -1012,6 +1098,9 @@ export default function App() {
         </button>
     );
 
+    const activePet = PETS[gameState.pets.activePetId];
+    const petLevel = gameState.pets.levels[gameState.pets.activePetId];
+
     return (
         <div className="bg-gray-900 text-white flex items-center justify-center min-h-screen font-sans">
             <style>{animations}</style>
@@ -1027,9 +1116,9 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Columna Izquierda */}
                     <div className="flex flex-col gap-6">
-                       <HeroPanel hero={gameState.hero} stats={totalStats} prestige={gameState.prestige} />
+                       <HeroPanel hero={{...gameState.hero, petLevel}} stats={totalStats} prestige={gameState.prestige} activePet={activePet} />
+                       <PetPanel pets={gameState.pets} gold={gameState.hero.gold} onActivate={handleActivatePet} onLevelUp={handleLevelUpPet} />
                        <SkillsPanel skills={gameState.skills} onUseSkill={useSkill} />
-                       <PrestigePanel hero={gameState.hero} prestige={gameState.prestige} onPrestige={handlePrestige} />
                     </div>
                     {/* Columna Central */}
                     <div className="flex flex-col gap-6">
