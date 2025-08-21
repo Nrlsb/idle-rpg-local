@@ -423,6 +423,21 @@ const PetPanel = ({ pets, gold, onActivate, onLevelUp }) => {
     );
 };
 
+// CORRECCIÓN: Definición del componente SettingsPanel
+const SettingsPanel = ({ settings, onToggleMusic, onToggleSfx }) => (
+    <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
+        <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Sonido</h2>
+        <div className="space-y-4">
+            <button onClick={onToggleMusic} className={`w-full font-bold py-2 px-4 rounded ${settings.musicOn ? 'bg-green-600' : 'bg-red-600'}`}>
+                Música: {settings.musicOn ? 'ON' : 'OFF'}
+            </button>
+            <button onClick={onToggleSfx} className={`w-full font-bold py-2 px-4 rounded ${settings.sfxOn ? 'bg-green-600' : 'bg-red-600'}`}>
+                Efectos: {settings.sfxOn ? 'ON' : 'OFF'}
+            </button>
+        </div>
+    </div>
+);
+
 
 const OfflineGainsModal = ({ gains, onClose }) => {
     const formatTime = (seconds) => {
@@ -1031,6 +1046,15 @@ export default function App() {
         });
         setDailyReward(null);
     }, [dailyReward, addLogMessage]);
+
+    // CORRECCIÓN: Funciones para manejar el sonido
+    const handleToggleMusic = () => {
+        setGameState(prev => ({ ...prev, settings: { ...prev.settings, musicOn: !prev.settings.musicOn } }));
+    };
+
+    const handleToggleSfx = () => {
+        setGameState(prev => ({ ...prev, settings: { ...prev.settings, sfxOn: !prev.settings.sfxOn } }));
+    };
 
 
     useEffect(() => {
