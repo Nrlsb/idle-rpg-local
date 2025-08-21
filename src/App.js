@@ -20,10 +20,11 @@ const initialHeroState = {
     maxHp: 100,
     damage: 10,
     critChance: 0.05,
-    critMultiplier: 1.5, // CORREGIDO: Faltaba esta propiedad
+    critMultiplier: 1.5,
     gold: 0,
     xp: 0,
     xpNeeded: 100,
+    skillPoints: 0, // NUEVO: Puntos de habilidad
     equipment: {
         weapon: null,
         shield: null,
@@ -51,6 +52,12 @@ const initialGameState = {
         powerfulStrike: { name: 'Golpe Poderoso', cooldown: 10, remaining: 0, description: 'Inflige 300% de daño.' },
         quickHeal: { name: 'Curación Rápida', cooldown: 30, remaining: 0, description: 'Cura 25% de la vida máxima.' },
         goldRush: { name: 'Lluvia de Oro', cooldown: 60, remaining: 0, description: 'Duplica el oro del próximo monstruo.' },
+    },
+    // NUEVO: Habilidades pasivas
+    passiveSkills: {
+        increasedDamage: { name: 'Fuerza Bruta', level: 0, cost: 1, increase: 0.02, description: '+2% Daño por nivel' },
+        increasedHealth: { name: 'Vitalidad', level: 0, cost: 1, increase: 0.03, description: '+3% Vida Máxima por nivel' },
+        fasterCooldowns: { name: 'Presteza', level: 0, cost: 2, increase: 0.01, description: '-1% Enfriamiento de Habilidades por nivel' }
     },
     effects: {
         powerfulStrikeActive: false,
@@ -86,6 +93,7 @@ const HeroPanel = ({ hero, stats, prestige }) => {
             {prestige.level > 0 && <p className="text-center text-yellow-400 font-bold">Prestigio: {prestige.level}</p>}
             <div className="space-y-3 text-lg mt-2">
                 <p><strong>Nivel:</strong> {hero.level}</p>
+                <p><strong>Puntos de Habilidad:</strong> <span className="text-green-400 font-bold">{hero.skillPoints}</span></p>
                 <p><strong>HP:</strong> {Math.round(hero.hp)} / {stats.maxHp}</p>
                 <p><strong>Daño:</strong> {stats.damage.toFixed(1)}</p>
                 <p><strong>Prob. Crítico:</strong> {(stats.critChance * 100).toFixed(2)}%</p>
@@ -148,7 +156,7 @@ const UpgradeButton = ({ onClick, disabled, children }) => (
 
 const UpgradesPanel = ({ gold, upgrades, onUpgrade }) => (
     <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-        <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Mejoras</h2>
+        <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Mejoras de Oro</h2>
         <div className="space-y-4">
             <UpgradeButton onClick={() => onUpgrade('damage')} disabled={gold < upgrades.damage.cost}>
                 Aumentar Daño (+{upgrades.damage.increase})
@@ -188,7 +196,8 @@ const SkillButton = ({ skill, onClick }) => {
             <span className="relative z-10">
                 {skill.name}
                 <br />
-                <span className="text-sm font-normal">{onCooldown ? `${skill.remaining}s` : skill.description}</span>
+                {/* CORRECCIÓN: Se comprueba si skill.remaining es un número antes de llamar a toFixed */}
+                <span className="text-sm font-normal">{onCooldown ? `${Number(skill.remaining).toFixed(1)}s` : skill.description}</span>
             </span>
         </button>
     );
@@ -273,6 +282,30 @@ const PrestigeUpgradesPanel = ({ relics, upgrades, onUpgrade }) => (
     </div>
 );
 
+// NUEVO: Panel de Habilidades Pasivas
+const PassiveSkillsPanel = ({ skillPoints, skills, onUpgrade }) => (
+    <div className="bg-gray-800 p-6 rounded-lg shadow-lg h-full">
+        <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Habilidades Pasivas</h2>
+        <div className="space-y-4">
+            {Object.entries(skills).map(([key, skill]) => (
+                <button
+                    key={key}
+                    onClick={() => onUpgrade(key)}
+                    disabled={skillPoints < skill.cost}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed"
+                >
+                    {skill.name} (Nvl {skill.level})
+                    <br />
+                    <span className="text-sm font-normal">{skill.description}</span>
+                    <br />
+                    <span className="text-sm font-normal">Costo: {skill.cost} Puntos</span>
+                </button>
+            ))}
+        </div>
+    </div>
+);
+
+
 const OfflineGainsModal = ({ gains, onClose }) => {
     const formatTime = (seconds) => {
         const h = Math.floor(seconds / 3600);
@@ -314,14 +347,23 @@ const FloatingText = ({ text, x, y, color, id }) => {
 export default function App() {
     const [gameState, setGameState] = useState(initialGameState);
     const [offlineGains, setOfflineGains] = useState(null);
+    const [activeTab, setActiveTab] = useState('upgrades'); // NUEVO: Estado para las pestañas
 
     const totalStats = useMemo(() => {
+        // Bonificaciones de Prestigio
         const prestigeDamageBonus = 1 + (gameState.prestigeUpgrades.damageBonus.level * gameState.prestigeUpgrades.damageBonus.increase);
+        
+        // NUEVO: Bonificaciones de Habilidades Pasivas
+        const passiveDamageBonus = 1 + (gameState.passiveSkills.increasedDamage.level * gameState.passiveSkills.increasedDamage.increase);
+        const passiveHealthBonus = 1 + (gameState.passiveSkills.increasedHealth.level * gameState.passiveSkills.increasedHealth.increase);
+
         const stats = {
-            damage: gameState.hero.damage * prestigeDamageBonus,
-            maxHp: gameState.hero.maxHp,
+            damage: gameState.hero.damage * prestigeDamageBonus * passiveDamageBonus,
+            maxHp: gameState.hero.maxHp * passiveHealthBonus,
             critChance: gameState.hero.critChance,
         };
+
+        // Bonificaciones de Equipamiento
         for (const slot in gameState.hero.equipment) {
             const item = gameState.hero.equipment[slot];
             if (item) {
@@ -329,7 +371,7 @@ export default function App() {
             }
         }
         return stats;
-    }, [gameState.hero, gameState.prestigeUpgrades]);
+    }, [gameState.hero, gameState.prestigeUpgrades, gameState.passiveSkills]);
 
 
     const addLogMessage = useCallback((text, color) => {
@@ -490,6 +532,7 @@ export default function App() {
                 let newXpNeeded = newState.hero.xpNeeded;
                 let newMaxHp = newState.hero.maxHp;
                 let newDamage = newState.hero.damage;
+                let newSkillPoints = newState.hero.skillPoints; // NUEVO
 
                 while (newXp >= newXpNeeded) {
                     newLevel++;
@@ -497,6 +540,7 @@ export default function App() {
                     newXpNeeded = Math.round(newXpNeeded * 1.5);
                     newMaxHp += 20;
                     newDamage += 5;
+                    newSkillPoints++; // NUEVO: Gana un punto de habilidad
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newLevel}.`, 'text-blue-400 font-bold');
                 }
                 
@@ -508,6 +552,7 @@ export default function App() {
                     maxHp: newMaxHp,
                     damage: newDamage,
                     hp: totalStats.maxHp, 
+                    skillPoints: newSkillPoints, // NUEVO
                 };
             }
             return newState;
@@ -539,8 +584,12 @@ export default function App() {
                 default:
                     return prev;
             }
+            
+            // NUEVO: Aplicar reducción de enfriamiento de pasivas
+            const cooldownReduction = 1 - (prev.passiveSkills.fasterCooldowns.level * prev.passiveSkills.fasterCooldowns.increase);
+            const finalCooldown = Math.max(1, skill.cooldown * cooldownReduction);
 
-            newState.skills[skillId].remaining = newState.skills[skillId].cooldown;
+            newState.skills[skillId].remaining = finalCooldown;
             return newState;
         });
     }, [addLogMessage, createFloatingText, totalStats]);
@@ -579,9 +628,10 @@ export default function App() {
             const relicsGained = Math.floor(prev.stage / 5) + prev.hero.level;
             addLogMessage(`¡RENACIMIENTO! Has ganado ${relicsGained} reliquias.`, 'text-yellow-200 font-bold text-lg');
 
+            // Habilidades pasivas y mejoras de reliquias persisten
             return {
                 ...prev,
-                hero: { ...initialHeroState },
+                hero: { ...initialHeroState }, // Reinicia el héroe
                 inventory: [],
                 upgrades: initialGameState.upgrades,
                 stage: 1,
@@ -616,6 +666,28 @@ export default function App() {
         });
     }, []);
 
+    // NUEVO: Manejador para mejorar habilidades pasivas
+    const handlePassiveSkillUpgrade = useCallback((skillId) => {
+        setGameState(prev => {
+            const skill = prev.passiveSkills[skillId];
+            if (prev.hero.skillPoints < skill.cost) return prev;
+
+            const newHero = { ...prev.hero, skillPoints: prev.hero.skillPoints - skill.cost };
+            const newPassiveSkills = {
+                ...prev.passiveSkills,
+                [skillId]: {
+                    ...skill,
+                    level: skill.level + 1,
+                    // Aumentar el costo para el siguiente nivel, por ejemplo
+                    cost: skill.cost + (skill.level < 5 ? 1 : 2),
+                }
+            };
+            
+            return { ...prev, hero: newHero, passiveSkills: newPassiveSkills };
+        });
+    }, []);
+
+
     useEffect(() => {
         const gameInterval = setInterval(() => {
             if (!gameState.isBossFight || gameState.bossTimer > 0) {
@@ -632,7 +704,7 @@ export default function App() {
                 let changed = false;
                 for (const skillId in newSkills) {
                     if (newSkills[skillId].remaining > 0) {
-                        newSkills[skillId].remaining--;
+                        newSkills[skillId].remaining = Math.max(0, newSkills[skillId].remaining - 1);
                         changed = true;
                     }
                 }
@@ -679,37 +751,52 @@ export default function App() {
         const savedStateJSON = localStorage.getItem('idleRpgGameState');
         const lastSaveTime = localStorage.getItem('idleRpgLastSave');
 
-        if (savedStateJSON && lastSaveTime) {
+        if (savedStateJSON) {
             let loadedState = JSON.parse(savedStateJSON);
-            const currentTime = Date.now();
-            const offlineSeconds = Math.floor((currentTime - parseInt(lastSaveTime, 10)) / 1000);
+            
+            // Fusionar estado guardado con el inicial para evitar errores si se añaden nuevas propiedades
+            loadedState = {
+                ...initialGameState,
+                ...loadedState,
+                hero: { ...initialGameState.hero, ...loadedState.hero },
+                prestige: { ...initialGameState.prestige, ...loadedState.prestige },
+                prestigeUpgrades: { ...initialGameState.prestigeUpgrades, ...loadedState.prestigeUpgrades },
+                passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills }, // Asegurar que las pasivas se cargan
+            };
 
-            if (offlineSeconds > 10) { 
-                const goldBonus = 1 + (loadedState.prestigeUpgrades.goldBonus.level * loadedState.prestigeUpgrades.goldBonus.increase);
-                const avgGoldPerKill = Math.round(5 * (1 + (loadedState.stage - 1) * 0.2) * goldBonus);
-                const avgXpPerKill = Math.round(10 * (1 + (loadedState.stage - 1) * 0.2));
-                const killsPerSecond = 1 / 4; 
-                const offlineRate = 0.25; 
 
-                const goldGained = Math.floor(offlineSeconds * killsPerSecond * avgGoldPerKill * offlineRate);
-                let xpGained = Math.floor(offlineSeconds * killsPerSecond * avgXpPerKill * offlineRate);
-                
-                loadedState.hero.gold += goldGained;
-                let currentXp = loadedState.hero.xp + xpGained;
-                let levelsGained = 0;
+            if (lastSaveTime) {
+                const currentTime = Date.now();
+                const offlineSeconds = Math.floor((currentTime - parseInt(lastSaveTime, 10)) / 1000);
 
-                while (currentXp >= loadedState.hero.xpNeeded) {
-                    currentXp -= loadedState.hero.xpNeeded;
-                    loadedState.hero.level++;
-                    levelsGained++;
-                    loadedState.hero.xpNeeded = Math.round(loadedState.hero.xpNeeded * 1.5);
-                    loadedState.hero.maxHp += 20;
-                    loadedState.hero.damage += 5;
+                if (offlineSeconds > 10) { 
+                    const goldBonus = 1 + (loadedState.prestigeUpgrades.goldBonus.level * loadedState.prestigeUpgrades.goldBonus.increase);
+                    const avgGoldPerKill = Math.round(5 * (1 + (loadedState.stage - 1) * 0.2) * goldBonus);
+                    const avgXpPerKill = Math.round(10 * (1 + (loadedState.stage - 1) * 0.2));
+                    const killsPerSecond = 1 / 4; 
+                    const offlineRate = 0.25; 
+
+                    const goldGained = Math.floor(offlineSeconds * killsPerSecond * avgGoldPerKill * offlineRate);
+                    let xpGained = Math.floor(offlineSeconds * killsPerSecond * avgXpPerKill * offlineRate);
+                    
+                    loadedState.hero.gold += goldGained;
+                    let currentXp = loadedState.hero.xp + xpGained;
+                    let levelsGained = 0;
+
+                    while (currentXp >= loadedState.hero.xpNeeded) {
+                        currentXp -= loadedState.hero.xpNeeded;
+                        loadedState.hero.level++;
+                        levelsGained++;
+                        loadedState.hero.xpNeeded = Math.round(loadedState.hero.xpNeeded * 1.5);
+                        loadedState.hero.maxHp += 20;
+                        loadedState.hero.damage += 5;
+                        loadedState.hero.skillPoints++; // Gana puntos de habilidad offline
+                    }
+                    loadedState.hero.xp = currentXp;
+                    loadedState.hero.hp = loadedState.hero.maxHp;
+
+                    setOfflineGains({ gold: goldGained, xp: xpGained, time: offlineSeconds, levels: levelsGained });
                 }
-                loadedState.hero.xp = currentXp;
-                loadedState.hero.hp = loadedState.hero.maxHp;
-
-                setOfflineGains({ gold: goldGained, xp: xpGained, time: offlineSeconds, levels: levelsGained });
             }
             setGameState(loadedState);
         }
@@ -755,6 +842,15 @@ export default function App() {
     }`;
     const floatingTextStyles = `.floating-text { animation: floatUp 1s ease-out forwards; }`;
 
+    const TabButton = ({ tabName, children }) => (
+        <button 
+            onClick={() => setActiveTab(tabName)}
+            className={`flex-1 py-2 px-4 rounded-t-lg font-semibold transition-colors ${activeTab === tabName ? 'bg-gray-800 text-yellow-400' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
+        >
+            {children}
+        </button>
+    );
+
     return (
         <div className="bg-gray-900 text-white flex items-center justify-center min-h-screen font-sans">
             <style>{floatUpAnimation}</style>
@@ -768,7 +864,6 @@ export default function App() {
 
             <div className="container mx-auto p-4 max-w-7xl w-full">
                 <h1 className="text-4xl font-bold text-center mb-6 text-yellow-400">Aventura Idle con React</h1>
-                {/* CORREGIDO: Layout de cuadrícula principal simplificado */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Columna Izquierda */}
                     <div className="flex flex-col gap-6">
@@ -794,12 +889,24 @@ export default function App() {
                     </div>
                     {/* Columna Derecha */}
                     <div className="flex flex-col gap-6">
-                        <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
-                        <PrestigeUpgradesPanel 
+                        {/* NUEVO: Sistema de Pestañas */}
+                        <div className="flex">
+                            <TabButton tabName="upgrades">Mejoras</TabButton>
+                            <TabButton tabName="prestige">Reliquias</TabButton>
+                            <TabButton tabName="passives">Pasivas</TabButton>
+                        </div>
+
+                        {activeTab === 'upgrades' && <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />}
+                        {activeTab === 'prestige' && <PrestigeUpgradesPanel 
                             relics={gameState.prestige.relics}
                             upgrades={gameState.prestigeUpgrades}
                             onUpgrade={handlePrestigeUpgrade}
-                        />
+                        />}
+                        {activeTab === 'passives' && <PassiveSkillsPanel
+                            skillPoints={gameState.hero.skillPoints}
+                            skills={gameState.passiveSkills}
+                            onUpgrade={handlePassiveSkillUpgrade}
+                        />}
                     </div>
                 </div>
             </div>
