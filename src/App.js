@@ -13,25 +13,26 @@ const ITEM_TEMPLATES = {
     amulet: { name: 'Amuleto', icon: '💎', stat: 'critChance', baseValue: 0.01 },
 };
 
-
 // --- Estado Inicial del Juego ---
-const initialGameState = {
-    hero: {
-        level: 1,
-        hp: 100,
-        maxHp: 100,
-        damage: 10,
-        critChance: 0.05,
-        critMultiplier: 1.5,
-        gold: 0,
-        xp: 0,
-        xpNeeded: 100,
-        equipment: {
-            weapon: null,
-            shield: null,
-            amulet: null,
-        },
+// Se ha dividido el estado inicial para poder reiniciarlo fácilmente con el prestigio.
+const initialHeroState = {
+    level: 1,
+    hp: 100,
+    maxHp: 100,
+    damage: 10,
+    critChance: 0.05,
+    gold: 0,
+    xp: 0,
+    xpNeeded: 100,
+    equipment: {
+        weapon: null,
+        shield: null,
+        amulet: null,
     },
+};
+
+const initialGameState = {
+    hero: initialHeroState,
     inventory: [],
     monster: {
         name: "Orco Débil",
@@ -59,26 +60,35 @@ const initialGameState = {
     monstersKilledInStage: 0,
     monstersPerStage: 10,
     monsterArt: ['👹', '👺', '👻', '👽', '💀', '🤖', '🎃', '🐲', '🦂', '🦇'],
-    // NUEVO: Arte específico para los jefes
     bossArt: ['😈', '🤡', '👹', '🧛', '🧟', '🧞', '🦍', '🐊', '🦖', '🐙'],
     combatLog: [],
     floatingTexts: [],
-    // NUEVO: Estado para la pelea contra el jefe
     isBossFight: false,
     bossTimer: 30,
+    // NUEVO: Estado para el Prestigio
+    prestige: {
+        level: 0,
+        relics: 0,
+        nextLevelReq: 50,
+    },
+    prestigeUpgrades: {
+        goldBonus: { name: 'Bendición Dorada', level: 0, cost: 1, increase: 0.1, description: '+10% Oro por nivel' },
+        damageBonus: { name: 'Fuerza Ancestral', level: 0, cost: 1, increase: 0.05, description: '+5% Daño por nivel' },
+    }
 };
 
 // --- Componentes de la UI ---
 
-const HeroPanel = ({ hero, stats }) => {
+const HeroPanel = ({ hero, stats, prestige }) => {
     const xpPercentage = (hero.xp / hero.xpNeeded) * 100;
     return (
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Héroe</h2>
-            <div className="space-y-3 text-lg">
+            {prestige.level > 0 && <p className="text-center text-yellow-400 font-bold">Prestigio: {prestige.level}</p>}
+            <div className="space-y-3 text-lg mt-2">
                 <p><strong>Nivel:</strong> {hero.level}</p>
                 <p><strong>HP:</strong> {Math.round(hero.hp)} / {stats.maxHp}</p>
-                <p><strong>Daño:</strong> {stats.damage}</p>
+                <p><strong>Daño:</strong> {stats.damage.toFixed(1)}</p>
                 <p><strong>Prob. Crítico:</strong> {(stats.critChance * 100).toFixed(2)}%</p>
                 <p><strong>Oro:</strong> {hero.gold}</p>
                 <div>
@@ -93,7 +103,6 @@ const HeroPanel = ({ hero, stats }) => {
     );
 };
 
-// MODIFICADO: El panel de combate ahora muestra el temporizador del jefe
 const CombatPanel = ({ monster, stage, combatLog, isBossFight, bossTimer }) => {
     const hpPercentage = (monster.hp / monster.maxHp) * 100;
     const logRef = useRef(null);
@@ -205,14 +214,14 @@ const ItemCard = ({ item, onClick, buttonText }) => {
     return (
         <div className={`bg-gray-700 p-2 rounded-lg border ${rarity.color.replace('text-', 'border-').slice(0, -4)}-500`}>
             <p className={`font-bold ${rarity.color}`}>{item.icon} {item.name}</p>
-            <p className="text-sm">+ {item.value.toFixed(item.stat === 'critChance' ? 2 : 0)} {item.stat === 'maxHp' ? 'HP' : item.stat === 'damage' ? 'Daño' : 'Crit'}</p>
+            <p className="text-sm">+ {item.stat === 'critChance' ? (item.value * 100).toFixed(1) + '%' : item.value.toFixed(0)} {item.stat === 'maxHp' ? 'HP' : item.stat === 'damage' ? 'Daño' : 'Crit'}</p>
             {onClick && <button onClick={onClick} className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-xs py-1 rounded">{buttonText}</button>}
         </div>
     );
 };
 
 const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip }) => (
-    <div className="bg-gray-800 p-6 rounded-lg shadow-lg md:col-span-2">
+    <div className="bg-gray-800 p-6 rounded-lg shadow-lg h-full">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Equipamiento</h2>
         <div className="grid grid-cols-3 gap-4 mb-4">
             <ItemCard item={equipment.weapon} onClick={equipment.weapon ? () => onUnequip('weapon') : null} buttonText="Quitar" />
@@ -227,6 +236,46 @@ const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip }) => (
         </div>
     </div>
 );
+
+// NUEVO: Panel de Prestigio
+const PrestigePanel = ({ hero, prestige, onPrestige }) => (
+    <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
+        <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Prestigio</h2>
+        <p className="text-center">Reliquias: <span className="font-bold text-yellow-300">{prestige.relics}</span></p>
+        <p className="text-center text-sm mb-4">Nivel Requerido: {prestige.nextLevelReq}</p>
+        <button
+            onClick={onPrestige}
+            disabled={hero.level < prestige.nextLevelReq}
+            className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed"
+        >
+            Renacer
+        </button>
+    </div>
+);
+
+// NUEVO: Panel de Mejoras de Prestigio
+const PrestigeUpgradesPanel = ({ relics, upgrades, onUpgrade }) => (
+     <div className="bg-gray-800 p-6 rounded-lg shadow-lg h-full">
+        <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Mejoras de Reliquia</h2>
+        <div className="space-y-4">
+            {Object.entries(upgrades).map(([key, upgrade]) => (
+                 <button
+                    key={key}
+                    onClick={() => onUpgrade(key)}
+                    disabled={relics < upgrade.cost}
+                    className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed"
+                 >
+                     {upgrade.name} (Nvl {upgrade.level})
+                     <br />
+                     <span className="text-sm font-normal">{upgrade.description}</span>
+                     <br/>
+                     <span className="text-sm font-normal">Costo: {upgrade.cost} Reliquias</span>
+                 </button>
+            ))}
+        </div>
+    </div>
+);
+
 
 const FloatingText = ({ text, x, y, color, id }) => {
     const style = {
@@ -246,8 +295,9 @@ export default function App() {
     const [gameState, setGameState] = useState(initialGameState);
 
     const totalStats = useMemo(() => {
+        const prestigeDamageBonus = 1 + (gameState.prestigeUpgrades.damageBonus.level * gameState.prestigeUpgrades.damageBonus.increase);
         const stats = {
-            damage: gameState.hero.damage,
+            damage: gameState.hero.damage * prestigeDamageBonus,
             maxHp: gameState.hero.maxHp,
             critChance: gameState.hero.critChance,
         };
@@ -258,7 +308,8 @@ export default function App() {
             }
         }
         return stats;
-    }, [gameState.hero.damage, gameState.hero.maxHp, gameState.hero.critChance, gameState.hero.equipment]);
+    }, [gameState.hero, gameState.prestigeUpgrades]);
+
 
     const addLogMessage = useCallback((text, color) => {
         setGameState(prev => ({
@@ -289,13 +340,11 @@ export default function App() {
     }, []);
 
     const generateLoot = useCallback((stage, isBoss = false) => {
-        // MODIFICADO: Aumenta la probabilidad de botín para los jefes
         const dropChance = isBoss ? 0.8 : 0.2;
         if (Math.random() > dropChance) return null;
 
         const rarityRoll = Math.random();
         let rarity;
-        // MODIFICADO: Mejores probabilidades de rareza para jefes
         if (isBoss) {
             if (rarityRoll < 0.2) rarity = 'epic';
             else if (rarityRoll < 0.6) rarity = 'rare';
@@ -322,16 +371,15 @@ export default function App() {
         };
     }, []);
 
-    // NUEVO: Función para invocar un jefe
     const spawnBoss = useCallback(() => {
         setGameState(prev => {
             const stageMultiplier = 1 + (prev.stage - 1) * 0.2;
             const bossNames = ["Rey Goblin", "Señor Esqueleto", "Limo Primordial", "Líder de la Manada", "Madre Araña"];
             const boss = {
                 name: `${bossNames[Math.floor(Math.random() * bossNames.length)]} (JEFE)`,
-                maxHp: Math.round(50 * stageMultiplier * 10), // Mucha más vida
+                maxHp: Math.round(50 * stageMultiplier * 10),
                 hp: Math.round(50 * stageMultiplier * 10),
-                goldReward: Math.round(5 * stageMultiplier * 15), // Mejores recompensas
+                goldReward: Math.round(5 * stageMultiplier * 15),
                 xpReward: Math.round(10 * stageMultiplier * 15),
                 art: prev.bossArt[Math.floor(Math.random() * prev.bossArt.length)],
             };
@@ -387,7 +435,6 @@ export default function App() {
             };
 
             if (newMonsterHp <= 0) {
-                // MODIFICADO: Lógica para después de derrotar a un monstruo/jefe
                 if (prev.isBossFight) {
                     addLogMessage(`¡JEFE DERROTADO!`, 'text-yellow-400 font-bold text-lg');
                     newState.stage++;
@@ -399,7 +446,10 @@ export default function App() {
 
                 addLogMessage(`${prev.monster.name} ha sido derrotado!`, 'text-red-500');
                 
-                let goldGained = prev.monster.goldReward;
+                // MODIFICADO: Aplicar bonificación de oro por prestigio
+                const goldBonus = 1 + (prev.prestigeUpgrades.goldBonus.level * prev.prestigeUpgrades.goldBonus.increase);
+                let goldGained = Math.round(prev.monster.goldReward * goldBonus);
+
                 if (prev.effects.goldRushActive) {
                     goldGained *= 2;
                     addLogMessage(`¡Lluvia de Oro! Recompensa duplicada.`, 'text-yellow-400 font-bold');
@@ -489,6 +539,53 @@ export default function App() {
         });
     }, []);
 
+    // NUEVO: Función para manejar el prestigio
+    const handlePrestige = useCallback(() => {
+        setGameState(prev => {
+            if (prev.hero.level < prev.prestige.nextLevelReq) return prev;
+
+            const relicsGained = Math.floor(prev.stage / 5) + prev.hero.level;
+            addLogMessage(`¡RENACIMIENTO! Has ganado ${relicsGained} reliquias.`, 'text-yellow-200 font-bold text-lg');
+
+            return {
+                ...prev,
+                hero: { ...initialHeroState, critMultiplier: prev.hero.critMultiplier },
+                inventory: [],
+                upgrades: initialGameState.upgrades,
+                stage: 1,
+                monstersKilledInStage: 0,
+                isBossFight: false,
+                bossTimer: 30,
+                prestige: {
+                    level: prev.prestige.level + 1,
+                    relics: prev.prestige.relics + relicsGained,
+                    nextLevelReq: prev.prestige.nextLevelReq + 10,
+                }
+            };
+        });
+    }, [addLogMessage]);
+
+    // NUEVO: Función para comprar mejoras de prestigio
+    const handlePrestigeUpgrade = useCallback((upgradeId) => {
+        setGameState(prev => {
+            const upgrade = prev.prestigeUpgrades[upgradeId];
+            if (prev.prestige.relics < upgrade.cost) return prev;
+
+            const newPrestige = { ...prev.prestige, relics: prev.prestige.relics - upgrade.cost };
+            const newPrestigeUpgrades = {
+                ...prev.prestigeUpgrades,
+                [upgradeId]: {
+                    ...upgrade,
+                    level: upgrade.level + 1,
+                    cost: upgrade.cost + (upgrade.level + 1), // Aumenta el costo
+                }
+            };
+            
+            return { ...prev, prestige: newPrestige, prestigeUpgrades: newPrestigeUpgrades };
+        });
+    }, []);
+
+
     useEffect(() => {
         const gameInterval = setInterval(() => {
             if (!gameState.isBossFight || gameState.bossTimer > 0) {
@@ -515,23 +612,21 @@ export default function App() {
         return () => clearInterval(cooldownInterval);
     }, []);
 
-    // MODIFICADO: Efecto para manejar la lógica de aparición de monstruos y jefes
     useEffect(() => {
         if (gameState.monster.hp <= 0) {
             const timeout = setTimeout(() => {
                 if (gameState.isBossFight) {
-                    spawnNewMonster(); // Si el jefe fue derrotado, aparece un monstruo normal
+                    spawnNewMonster();
                 } else if (gameState.monstersKilledInStage >= gameState.monstersPerStage) {
-                    spawnBoss(); // Si se alcanza el límite de la etapa, aparece un jefe
+                    spawnBoss();
                 } else {
-                    spawnNewMonster(); // Si no, aparece otro monstruo normal
+                    spawnNewMonster();
                 }
             }, 500);
             return () => clearTimeout(timeout);
         }
     }, [gameState.monster.hp, gameState.monstersKilledInStage, gameState.monstersPerStage, gameState.isBossFight, spawnNewMonster, spawnBoss]);
     
-    // NUEVO: Efecto para el temporizador del jefe
     useEffect(() => {
         if (!gameState.isBossFight) return;
 
@@ -540,10 +635,9 @@ export default function App() {
                 if (prev.bossTimer > 0) {
                     return { ...prev, bossTimer: prev.bossTimer - 1 };
                 } else {
-                    // El tiempo se acabó
                     addLogMessage('¡Tiempo agotado! El jefe se ha recuperado.', 'text-red-500 font-bold');
                     const newMonster = { ...prev.monster, hp: prev.monster.maxHp };
-                    return { ...prev, monster: newMonster, bossTimer: 30 }; // Reinicia el jefe
+                    return { ...prev, monster: newMonster, bossTimer: 30 };
                 }
             });
         }, 1000);
@@ -595,7 +689,7 @@ export default function App() {
                 <h1 className="text-4xl font-bold text-center mb-6 text-yellow-400">Aventura Idle con React</h1>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     <div className="flex flex-col gap-6">
-                       <HeroPanel hero={gameState.hero} stats={totalStats} />
+                       <HeroPanel hero={gameState.hero} stats={totalStats} prestige={gameState.prestige} />
                        <SkillsPanel skills={gameState.skills} onUseSkill={useSkill} />
                     </div>
                     <div className="md:col-span-2">
@@ -609,14 +703,20 @@ export default function App() {
                     </div>
                     <div className="flex flex-col gap-6">
                         <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
+                        <PrestigePanel hero={gameState.hero} prestige={gameState.prestige} onPrestige={handlePrestige} />
                     </div>
                 </div>
-                <div className="mt-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
                     <InventoryPanel 
                         equipment={gameState.hero.equipment} 
                         inventory={gameState.inventory} 
                         onEquip={equipItem}
                         onUnequip={unequipItem}
+                    />
+                    <PrestigeUpgradesPanel 
+                        relics={gameState.prestige.relics}
+                        upgrades={gameState.prestigeUpgrades}
+                        onUpgrade={handlePrestigeUpgrade}
                     />
                 </div>
             </div>
