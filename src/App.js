@@ -1,7 +1,20 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+
+// --- Constantes del Juego ---
+const ITEM_RARITIES = {
+    common: { name: 'Común', color: 'text-gray-300', multiplier: 1 },
+    rare: { name: 'Raro', color: 'text-blue-400', multiplier: 1.5 },
+    epic: { name: 'Épico', color: 'text-purple-500', multiplier: 2.5 },
+};
+
+const ITEM_TEMPLATES = {
+    weapon: { name: 'Espada', icon: '⚔️', stat: 'damage', baseValue: 2 },
+    shield: { name: 'Escudo', icon: '🛡️', stat: 'maxHp', baseValue: 10 },
+    amulet: { name: 'Amuleto', icon: '💎', stat: 'critChance', baseValue: 0.01 },
+};
+
 
 // --- Estado Inicial del Juego ---
-// Se ha añadido un objeto 'skills' para manejar el estado de las habilidades.
 const initialGameState = {
     hero: {
         level: 1,
@@ -13,7 +26,15 @@ const initialGameState = {
         gold: 0,
         xp: 0,
         xpNeeded: 100,
+        // NUEVO: Espacios para el equipamiento
+        equipment: {
+            weapon: null,
+            shield: null,
+            amulet: null,
+        },
     },
+    // NUEVO: Inventario para guardar los objetos
+    inventory: [],
     monster: {
         name: "Orco Débil",
         hp: 50,
@@ -27,7 +48,6 @@ const initialGameState = {
         health: { cost: 15, increase: 10, level: 0 },
         critChance: { cost: 50, increase: 0.01, level: 0 },
     },
-    // NUEVO: Estado para las habilidades
     skills: {
         powerfulStrike: { name: 'Golpe Poderoso', cooldown: 10, remaining: 0, description: 'Inflige 300% de daño.' },
         quickHeal: { name: 'Curación Rápida', cooldown: 30, remaining: 0, description: 'Cura 25% de la vida máxima.' },
@@ -47,16 +67,17 @@ const initialGameState = {
 
 // --- Componentes de la UI ---
 
-// Panel del Héroe (sin cambios)
-const HeroPanel = ({ hero }) => {
+// MODIFICADO: El panel del héroe ahora muestra las estadísticas calculadas
+const HeroPanel = ({ hero, stats }) => {
     const xpPercentage = (hero.xp / hero.xpNeeded) * 100;
     return (
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Héroe</h2>
             <div className="space-y-3 text-lg">
                 <p><strong>Nivel:</strong> {hero.level}</p>
-                <p><strong>HP:</strong> {Math.round(hero.hp)} / {hero.maxHp}</p>
-                <p><strong>Daño:</strong> {hero.damage}</p>
+                <p><strong>HP:</strong> {Math.round(hero.hp)} / {stats.maxHp}</p>
+                <p><strong>Daño:</strong> {stats.damage}</p>
+                <p><strong>Prob. Crítico:</strong> {(stats.critChance * 100).toFixed(2)}%</p>
                 <p><strong>Oro:</strong> {hero.gold}</p>
                 <div>
                     <strong>XP:</strong>
@@ -82,7 +103,7 @@ const CombatPanel = ({ monster, stage, combatLog }) => {
     }, [combatLog]);
 
     return (
-        <div className="bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col items-center justify-between">
+        <div className="bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col items-center justify-between h-full">
             <div>
                 <h2 className="text-2xl font-bold text-center text-red-400">{monster.name}</h2>
                 <div id="monster-art-container" className="text-6xl text-center my-4 relative">{monster.art}</div>
@@ -96,7 +117,7 @@ const CombatPanel = ({ monster, stage, combatLog }) => {
                 </div>
                 <p className="text-center mt-2"><strong>Etapa:</strong> {stage}</p>
             </div>
-            <div ref={logRef} className="w-full h-32 bg-gray-900 rounded-lg mt-4 p-2 overflow-y-auto text-sm">
+            <div ref={logRef} className="w-full h-48 bg-gray-900 rounded-lg mt-4 p-2 overflow-y-auto text-sm">
                 {combatLog.map((msg, index) => (
                     <p key={index} className={msg.color}>{msg.text}</p>
                 ))}
@@ -135,7 +156,7 @@ const UpgradesPanel = ({ gold, upgrades, onUpgrade }) => (
     </div>
 );
 
-// NUEVO: Componente para un botón de habilidad individual
+// Componente de botón de habilidad (sin cambios)
 const SkillButton = ({ skill, onClick }) => {
     const onCooldown = skill.remaining > 0;
     const cooldownPercentage = (skill.cooldown - skill.remaining) / skill.cooldown * 100;
@@ -161,7 +182,7 @@ const SkillButton = ({ skill, onClick }) => {
     );
 };
 
-// NUEVO: Panel de Habilidades
+// Panel de Habilidades (sin cambios)
 const SkillsPanel = ({ skills, onUseSkill }) => (
     <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Habilidades</h2>
@@ -169,6 +190,39 @@ const SkillsPanel = ({ skills, onUseSkill }) => (
             <SkillButton skill={skills.powerfulStrike} onClick={() => onUseSkill('powerfulStrike')} />
             <SkillButton skill={skills.quickHeal} onClick={() => onUseSkill('quickHeal')} />
             <SkillButton skill={skills.goldRush} onClick={() => onUseSkill('goldRush')} />
+        </div>
+    </div>
+);
+
+// NUEVO: Componente para mostrar un objeto
+const ItemCard = ({ item, onClick, buttonText }) => {
+    if (!item) {
+        return <div className="bg-gray-700 p-2 rounded-lg text-center text-gray-400 h-24 flex items-center justify-center">Vacío</div>;
+    }
+    const rarity = ITEM_RARITIES[item.rarity];
+    return (
+        <div className={`bg-gray-700 p-2 rounded-lg border ${rarity.color.replace('text-', 'border-').slice(0, -4)}-500`}>
+            <p className={`font-bold ${rarity.color}`}>{item.icon} {item.name}</p>
+            <p className="text-sm">+ {item.value.toFixed(item.stat === 'critChance' ? 2 : 0)} {item.stat === 'maxHp' ? 'HP' : item.stat === 'damage' ? 'Daño' : 'Crit'}</p>
+            {onClick && <button onClick={onClick} className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-xs py-1 rounded">{buttonText}</button>}
+        </div>
+    );
+};
+
+// NUEVO: Panel de Inventario y Equipamiento
+const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip }) => (
+    <div className="bg-gray-800 p-6 rounded-lg shadow-lg md:col-span-2">
+        <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Equipamiento</h2>
+        <div className="grid grid-cols-3 gap-4 mb-4">
+            <ItemCard item={equipment.weapon} onClick={equipment.weapon ? () => onUnequip('weapon') : null} buttonText="Quitar" />
+            <ItemCard item={equipment.shield} onClick={equipment.shield ? () => onUnequip('shield') : null} buttonText="Quitar" />
+            <ItemCard item={equipment.amulet} onClick={equipment.amulet ? () => onUnequip('amulet') : null} buttonText="Quitar" />
+        </div>
+        <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Inventario ({inventory.length})</h2>
+        <div className="grid grid-cols-4 gap-2 h-48 overflow-y-auto">
+            {inventory.map(item => (
+                <ItemCard key={item.id} item={item} onClick={() => onEquip(item.id)} buttonText="Equipar" />
+            ))}
         </div>
     </div>
 );
@@ -191,6 +245,23 @@ const FloatingText = ({ text, x, y, color, id }) => {
 // --- Componente Principal de la App ---
 export default function App() {
     const [gameState, setGameState] = useState(initialGameState);
+
+    // NUEVO: useMemo para calcular las estadísticas totales del héroe
+    const totalStats = useMemo(() => {
+        const stats = {
+            damage: gameState.hero.damage,
+            maxHp: gameState.hero.maxHp,
+            critChance: gameState.hero.critChance,
+        };
+        for (const slot in gameState.hero.equipment) {
+            const item = gameState.hero.equipment[slot];
+            if (item) {
+                stats[item.stat] += item.value;
+            }
+        }
+        return stats;
+    }, [gameState.hero.damage, gameState.hero.maxHp, gameState.hero.critChance, gameState.hero.equipment]);
+
 
     const addLogMessage = useCallback((text, color) => {
         setGameState(prev => ({
@@ -220,6 +291,33 @@ export default function App() {
         }, 1000);
     }, []);
 
+    // NUEVO: Función para generar botín
+    const generateLoot = useCallback((stage) => {
+        if (Math.random() > 0.2) return null; // 20% de probabilidad de soltar un objeto
+
+        const rarityRoll = Math.random();
+        let rarity;
+        if (rarityRoll < 0.05) rarity = 'epic';
+        else if (rarityRoll < 0.25) rarity = 'rare';
+        else rarity = 'common';
+
+        const itemTypes = Object.keys(ITEM_TEMPLATES);
+        const itemTypeKey = itemTypes[Math.floor(Math.random() * itemTypes.length)];
+        const template = ITEM_TEMPLATES[itemTypeKey];
+
+        const value = template.baseValue * ITEM_RARITIES[rarity].multiplier * (1 + (stage - 1) * 0.1);
+
+        return {
+            id: Date.now() + Math.random(),
+            name: `${template.name} ${ITEM_RARITIES[rarity].name}`,
+            icon: template.icon,
+            type: itemTypeKey,
+            stat: template.stat,
+            value: value,
+            rarity: rarity,
+        };
+    }, []);
+
     const spawnNewMonster = useCallback(() => {
         setGameState(prev => {
             const stageMultiplier = 1 + (prev.stage - 1) * 0.2;
@@ -243,43 +341,49 @@ export default function App() {
         setGameState(prev => {
             if (prev.monster.hp <= 0) return prev;
 
-            let damageDealt = prev.hero.damage;
-            let isCrit = Math.random() < prev.hero.critChance;
+            // MODIFICADO: Usa las estadísticas totales para el combate
+            let damageDealt = totalStats.damage;
+            let isCrit = Math.random() < totalStats.critChance;
             
-            // MODIFICADO: Aplicar efecto de Golpe Poderoso
             if (prev.effects.powerfulStrikeActive) {
                 damageDealt *= 3;
-                addLogMessage(`¡GOLPE PODEROSO! Héroe ataca por ${damageDealt} de daño.`, 'text-orange-500 font-bold');
-                createFloatingText(damageDealt, 'orange');
+                addLogMessage(`¡GOLPE PODEROSO! Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-orange-500 font-bold');
+                createFloatingText(damageDealt.toFixed(0), 'orange');
             } else if (isCrit) {
                 damageDealt = Math.round(damageDealt * prev.hero.critMultiplier);
                 addLogMessage(`¡GOLPE CRÍTICO! Héroe ataca por ${damageDealt} de daño.`, 'text-yellow-400');
                 createFloatingText(damageDealt, 'yellow');
             } else {
-                addLogMessage(`Héroe ataca por ${damageDealt} de daño.`, 'text-green-400');
-                createFloatingText(damageDealt, 'white');
+                addLogMessage(`Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-green-400');
+                createFloatingText(damageDealt.toFixed(0), 'white');
             }
 
             const newMonsterHp = prev.monster.hp - damageDealt;
             let newState = { 
                 ...prev, 
                 monster: { ...prev.monster, hp: newMonsterHp },
-                effects: { ...prev.effects, powerfulStrikeActive: false } // Desactivar después de usar
+                effects: { ...prev.effects, powerfulStrikeActive: false }
             };
 
             if (newMonsterHp <= 0) {
                 addLogMessage(`${prev.monster.name} ha sido derrotado!`, 'text-red-500');
                 
-                // MODIFICADO: Aplicar efecto de Lluvia de Oro
                 let goldGained = prev.monster.goldReward;
                 if (prev.effects.goldRushActive) {
                     goldGained *= 2;
                     addLogMessage(`¡Lluvia de Oro! Recompensa duplicada.`, 'text-yellow-400 font-bold');
-                    newState.effects.goldRushActive = false; // Desactivar después de usar
+                    newState.effects.goldRushActive = false;
                 }
 
                 addLogMessage(`+${goldGained} Oro, +${prev.monster.xpReward} XP`, 'text-yellow-300');
                 
+                // NUEVO: Generar y añadir botín
+                const loot = generateLoot(newState.stage);
+                if (loot) {
+                    newState.inventory = [...newState.inventory, loot];
+                    addLogMessage(`¡Has encontrado ${loot.name}!`, ITEM_RARITIES[loot.rarity].color);
+                }
+
                 newState.hero.gold += goldGained;
                 newState.hero.xp += prev.monster.xpReward;
                 newState.monstersKilledInStage++;
@@ -289,7 +393,7 @@ export default function App() {
                     newState.hero.xp -= newState.hero.xpNeeded;
                     newState.hero.xpNeeded = Math.round(newState.hero.xpNeeded * 1.5);
                     newState.hero.maxHp += 20;
-                    newState.hero.hp = newState.hero.maxHp;
+                    newState.hero.hp = totalStats.maxHp; // Cura al máximo al subir de nivel
                     newState.hero.damage += 5;
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newState.hero.level}.`, 'text-blue-400 font-bold');
                 }
@@ -302,13 +406,12 @@ export default function App() {
             }
             return newState;
         });
-    }, [addLogMessage, createFloatingText]);
+    }, [addLogMessage, createFloatingText, generateLoot, totalStats]);
     
-    // NUEVO: Lógica para usar habilidades
     const useSkill = useCallback((skillId) => {
         setGameState(prev => {
             const skill = prev.skills[skillId];
-            if (skill.remaining > 0) return prev; // Ya está en enfriamiento
+            if (skill.remaining > 0) return prev;
 
             let newState = { ...prev };
             
@@ -318,8 +421,8 @@ export default function App() {
                     addLogMessage('¡Preparando un Golpe Poderoso!', 'text-orange-400');
                     break;
                 case 'quickHeal':
-                    const healAmount = Math.round(prev.hero.maxHp * 0.25);
-                    newState.hero.hp = Math.min(prev.hero.maxHp, prev.hero.hp + healAmount);
+                    const healAmount = Math.round(totalStats.maxHp * 0.25);
+                    newState.hero.hp = Math.min(totalStats.maxHp, prev.hero.hp + healAmount);
                     addLogMessage(`¡Te curas por ${healAmount} HP!`, 'text-teal-400');
                     createFloatingText(`+${healAmount} HP`, 'lightgreen', -30);
                     break;
@@ -331,14 +434,39 @@ export default function App() {
                     return prev;
             }
 
-            // Poner la habilidad en enfriamiento
             newState.skills[skillId].remaining = newState.skills[skillId].cooldown;
             return newState;
         });
-    }, [addLogMessage, createFloatingText]);
+    }, [addLogMessage, createFloatingText, totalStats]);
 
+    // NUEVO: Funciones para equipar y desequipar objetos
+    const equipItem = useCallback((itemId) => {
+        setGameState(prev => {
+            const itemToEquip = prev.inventory.find(item => item.id === itemId);
+            if (!itemToEquip) return prev;
 
-    // Bucle principal del juego
+            const newInventory = prev.inventory.filter(item => item.id !== itemId);
+            const currentItem = prev.hero.equipment[itemToEquip.type];
+            if (currentItem) {
+                newInventory.push(currentItem);
+            }
+
+            const newEquipment = { ...prev.hero.equipment, [itemToEquip.type]: itemToEquip };
+            return { ...prev, inventory: newInventory, hero: { ...prev.hero, equipment: newEquipment } };
+        });
+    }, []);
+
+    const unequipItem = useCallback((slot) => {
+        setGameState(prev => {
+            const itemToUnequip = prev.hero.equipment[slot];
+            if (!itemToUnequip) return prev;
+
+            const newInventory = [...prev.inventory, itemToUnequip];
+            const newEquipment = { ...prev.hero.equipment, [slot]: null };
+            return { ...prev, inventory: newInventory, hero: { ...prev.hero, equipment: newEquipment } };
+        });
+    }, []);
+
     useEffect(() => {
         const gameInterval = setInterval(() => {
             heroAttack();
@@ -346,7 +474,6 @@ export default function App() {
         return () => clearInterval(gameInterval);
     }, [heroAttack]);
     
-    // NUEVO: Bucle para los enfriamientos de habilidades
     useEffect(() => {
         const cooldownInterval = setInterval(() => {
             setGameState(prev => {
@@ -409,18 +536,28 @@ export default function App() {
                 <FloatingText key={ft.id} {...ft} />
             ))}
 
-            <div className="container mx-auto p-4 max-w-6xl w-full">
+            <div className="container mx-auto p-4 max-w-7xl w-full">
                 <h1 className="text-4xl font-bold text-center mb-6 text-yellow-400">Aventura Idle con React</h1>
-                {/* MODIFICADO: Cambiado a una cuadrícula de 4 columnas y reorganizado */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     <div className="flex flex-col gap-6">
-                       <HeroPanel hero={gameState.hero} />
+                       <HeroPanel hero={gameState.hero} stats={totalStats} />
                        <SkillsPanel skills={gameState.skills} onUseSkill={useSkill} />
                     </div>
                     <div className="md:col-span-2">
                        <CombatPanel monster={gameState.monster} stage={gameState.stage} combatLog={gameState.combatLog} />
                     </div>
-                    <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
+                    <div className="flex flex-col gap-6">
+                        <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
+                    </div>
+                </div>
+                {/* NUEVO: Fila para el inventario */}
+                <div className="mt-6">
+                    <InventoryPanel 
+                        equipment={gameState.hero.equipment} 
+                        inventory={gameState.inventory} 
+                        onEquip={equipItem}
+                        onUnequip={unequipItem}
+                    />
                 </div>
             </div>
         </div>
