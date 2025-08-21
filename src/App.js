@@ -1069,7 +1069,6 @@ const useGameLogic = (audioManager) => {
         });
     };
     
-    // CORRECCIÓN: Handler para cerrar el modal de ganancias offline
     const clearOfflineGains = useCallback(() => {
         setOfflineGains(null);
     }, []);
@@ -1234,13 +1233,16 @@ export default function App() {
     const [isAudioReady, setIsAudioReady] = useState(false);
     const [activeTab, setActiveTab] = useState('upgrades');
 
+    // CORRECCIÓN: Se pasa solo `settings` al hook de audio
+    const audioManager = useAudioManager(initialGameState.settings); 
+
     const {
         gameState,
         offlineGains,
         dailyReward,
         totalStats,
         handlers
-    } = useGameLogic(useAudioManager(gameState.settings));
+    } = useGameLogic(audioManager);
 
     const handleStartGame = async () => {
         if (typeof window.Tone !== 'undefined') {
