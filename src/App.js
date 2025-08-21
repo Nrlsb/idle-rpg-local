@@ -112,7 +112,7 @@ const initialGameState = {
     },
 };
 
-// --- Componentes de la UI ---
+// --- COMPONENTES DE UI ---
 
 const HeroPanel = ({ hero, stats, prestige, activePet }) => {
     const xpPercentage = (hero.xp / hero.xpNeeded) * 100;
@@ -423,7 +423,6 @@ const PetPanel = ({ pets, gold, onActivate, onLevelUp }) => {
     );
 };
 
-// CORRECCIÓN: Definición del componente SettingsPanel
 const SettingsPanel = ({ settings, onToggleMusic, onToggleSfx }) => (
     <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Sonido</h2>
@@ -494,21 +493,16 @@ const FloatingText = ({ text, x, y, color, id }) => {
     );
 };
 
-// --- Componente Principal de la App ---
-export default function App() {
-    const [gameState, setGameState] = useState(initialGameState);
-    const [offlineGains, setOfflineGains] = useState(null);
-    const [dailyReward, setDailyReward] = useState(null);
-    const [activeTab, setActiveTab] = useState('upgrades');
-    const [isAudioReady, setIsAudioReady] = useState(false);
+// --- HOOKS PERSONALIZADOS ---
 
+const useAudioManager = (settings) => {
     const audioManager = useRef(null);
 
     useEffect(() => {
-        if (!isAudioReady || typeof window.Tone === 'undefined') return;
+        if (typeof window.Tone === 'undefined') return;
 
         if (!audioManager.current) {
-            const synths = {
+             const synths = {
                 attack: new window.Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 } }).toDestination(),
                 crit: new window.Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 } }).toDestination(),
                 levelUp: new window.Tone.PolySynth(window.Tone.Synth).toDestination(),
@@ -526,7 +520,7 @@ export default function App() {
                 synths,
                 musicLoop,
                 playSound: (sound) => {
-                    if (!gameState.settings.sfxOn) return;
+                    if (!settings.sfxOn) return;
                     try {
                         switch(sound) {
                             case 'attack': synths.attack.triggerAttackRelease('C4', '8n'); break;
@@ -542,26 +536,22 @@ export default function App() {
             };
         }
 
-        if (gameState.settings.musicOn) {
+        if (settings.musicOn) {
             window.Tone.Transport.start();
             audioManager.current.musicLoop.start(0);
         } else {
             audioManager.current.musicLoop.stop(0);
         }
+    }, [settings.musicOn, settings.sfxOn]);
 
-    }, [isAudioReady, gameState.settings.sfxOn, gameState.settings.musicOn]);
+    return audioManager.current;
+};
 
-    const handleStartGame = async () => {
-        if (typeof window.Tone !== 'undefined') {
-            await window.Tone.start();
-            setIsAudioReady(true);
-        } else {
-            // Fallback si Tone.js no carga
-            alert("La librería de audio no pudo cargar. El juego funcionará sin sonido.");
-            setIsAudioReady(true); // Permite que el juego inicie sin audio
-        }
-    };
-    
+const useGameLogic = (audioManager) => {
+    const [gameState, setGameState] = useState(initialGameState);
+    const [offlineGains, setOfflineGains] = useState(null);
+    const [dailyReward, setDailyReward] = useState(null);
+
     const totalStats = useMemo(() => {
         const prestigeDamageBonus = 1 + (gameState.prestigeUpgrades.damageBonus.level * gameState.prestigeUpgrades.damageBonus.increase);
         const passiveDamageBonus = 1 + (gameState.passiveSkills.increasedDamage.level * gameState.passiveSkills.increasedDamage.increase);
@@ -704,16 +694,16 @@ export default function App() {
                 damageDealt *= 3;
                 addLogMessage(`¡GOLPE PODEROSO! Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-orange-500 font-bold');
                 createFloatingText(damageDealt.toFixed(0), 'orange');
-                 audioManager.current?.playSound('crit');
+                 audioManager?.playSound('crit');
             } else if (isCrit) {
                 damageDealt = Math.round(damageDealt * prev.hero.critMultiplier);
                 addLogMessage(`¡GOLPE CRÍTICO! Héroe ataca por ${damageDealt} de daño.`, 'text-yellow-400');
                 createFloatingText(damageDealt, 'yellow');
-                 audioManager.current?.playSound('crit');
+                 audioManager?.playSound('crit');
             } else {
                 addLogMessage(`Héroe ataca por ${damageDealt.toFixed(0)} de daño.`, 'text-green-400');
                 createFloatingText(damageDealt.toFixed(0), 'white');
-                 audioManager.current?.playSound('attack');
+                 audioManager?.playSound('attack');
             }
             
             const newStateWithAnimation = { ...prev, monsterAnimation: 'shake' };
@@ -761,7 +751,7 @@ export default function App() {
                 if (loot) {
                     newState.inventory = [...newState.inventory, loot];
                     addLogMessage(`¡Has encontrado ${loot.name}!`, ITEM_RARITIES[loot.rarity].color);
-                    audioManager.current?.playSound('gold');
+                    audioManager?.playSound('gold');
                 }
 
                 newState.hero.gold += goldGained;
@@ -780,7 +770,7 @@ export default function App() {
                     newDamage += 5;
                     newSkillPoints++;
                     addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newLevel}.`, 'text-blue-400 font-bold');
-                    audioManager.current?.playSound('levelUp');
+                    audioManager?.playSound('levelUp');
                 }
                 
                 newState.hero = {
@@ -796,7 +786,7 @@ export default function App() {
             }
             return newState;
         });
-    }, [addLogMessage, createFloatingText, generateLoot, totalStats]);
+    }, [addLogMessage, createFloatingText, generateLoot, totalStats, audioManager]);
     
     const useSkill = useCallback((skillId) => {
         setGameState(prev => {
@@ -824,14 +814,14 @@ export default function App() {
                     return prev;
             }
             
-            audioManager.current?.playSound('skill');
+            audioManager?.playSound('skill');
             const cooldownReduction = 1 - (prev.passiveSkills.fasterCooldowns.level * prev.passiveSkills.fasterCooldowns.increase);
             const finalCooldown = Math.max(1, skill.cooldown * cooldownReduction);
 
             newState.skills[skillId].remaining = finalCooldown;
             return newState;
         });
-    }, [addLogMessage, createFloatingText, totalStats]);
+    }, [addLogMessage, createFloatingText, totalStats, audioManager]);
 
     const equipItem = useCallback((itemId) => {
         setGameState(prev => {
@@ -878,11 +868,11 @@ export default function App() {
                 first = false;
             }
             addLogMessage(logMsg, 'text-gray-400');
-            audioManager.current?.playSound('craft');
+            audioManager?.playSound('craft');
 
             return { ...prev, inventory: newInventory, hero: { ...prev.hero, materials: newMaterials }};
         });
-    }, [addLogMessage]);
+    }, [addLogMessage, audioManager]);
 
     const sellItem = useCallback((itemId) => {
         setGameState(prev => {
@@ -897,11 +887,11 @@ export default function App() {
             const newHero = { ...prev.hero, gold: prev.hero.gold + finalValue };
             
             addLogMessage(`Vendido ${itemToSell.name} por ${finalValue} oro.`, 'text-yellow-300');
-            audioManager.current?.playSound('gold');
+            audioManager?.playSound('gold');
 
             return { ...prev, inventory: newInventory, hero: newHero };
         });
-    }, [addLogMessage]);
+    }, [addLogMessage, audioManager]);
 
 
     const upgradeItem = useCallback((slot) => {
@@ -941,11 +931,11 @@ export default function App() {
             const newEquipment = { ...prev.hero.equipment, [slot]: upgradedItem };
 
             addLogMessage(`¡${item.name} mejorado a +${upgradedItem.upgradeLevel}!`, 'text-orange-400');
-            audioManager.current?.playSound('craft');
+            audioManager?.playSound('craft');
 
             return { ...prev, hero: { ...newHero, equipment: newEquipment }};
         });
-    }, [addLogMessage]);
+    }, [addLogMessage, audioManager]);
 
     const handlePrestige = useCallback(() => {
         setGameState(prev => {
@@ -1047,7 +1037,6 @@ export default function App() {
         setDailyReward(null);
     }, [dailyReward, addLogMessage]);
 
-    // CORRECCIÓN: Funciones para manejar el sonido
     const handleToggleMusic = () => {
         setGameState(prev => ({ ...prev, settings: { ...prev.settings, musicOn: !prev.settings.musicOn } }));
     };
@@ -1056,6 +1045,29 @@ export default function App() {
         setGameState(prev => ({ ...prev, settings: { ...prev.settings, sfxOn: !prev.settings.sfxOn } }));
     };
 
+    const handleUpgrade = (upgradeType) => {
+        setGameState(prev => {
+            const upgrade = prev.upgrades[upgradeType];
+            if (prev.hero.gold < upgrade.cost) return prev;
+
+            const newHero = { ...prev.hero, gold: prev.hero.gold - upgrade.cost };
+            const newUpgrades = { ...prev.upgrades };
+
+            if (upgradeType === 'damage') {
+                newHero.damage += upgrade.increase;
+                newUpgrades.damage.cost = Math.round(upgrade.cost * 1.15);
+            } else if (upgradeType === 'health') {
+                newHero.maxHp += upgrade.increase;
+                newHero.hp += upgrade.increase;
+                newUpgrades.health.cost = Math.round(upgrade.cost * 1.2);
+            } else if (upgradeType === 'critChance') {
+                newHero.critChance += upgrade.increase;
+                newUpgrades.critChance.cost = Math.round(upgrade.cost * 1.5);
+            }
+
+            return { ...prev, hero: newHero, upgrades: newUpgrades };
+        });
+    };
 
     useEffect(() => {
         const gameInterval = setInterval(() => {
@@ -1185,49 +1197,61 @@ export default function App() {
         return () => clearInterval(saveInterval);
     }, [gameState]);
 
-
-    const handleUpgrade = (upgradeType) => {
-        setGameState(prev => {
-            const upgrade = prev.upgrades[upgradeType];
-            if (prev.hero.gold < upgrade.cost) return prev;
-
-            const newHero = { ...prev.hero, gold: prev.hero.gold - upgrade.cost };
-            const newUpgrades = { ...prev.upgrades };
-
-            if (upgradeType === 'damage') {
-                newHero.damage += upgrade.increase;
-                newUpgrades.damage.cost = Math.round(upgrade.cost * 1.15);
-            } else if (upgradeType === 'health') {
-                newHero.maxHp += upgrade.increase;
-                newHero.hp += upgrade.increase;
-                newUpgrades.health.cost = Math.round(upgrade.cost * 1.2);
-            } else if (upgradeType === 'critChance') {
-                newHero.critChance += upgrade.increase;
-                newUpgrades.critChance.cost = Math.round(upgrade.cost * 1.5);
-            }
-
-            return { ...prev, hero: newHero, upgrades: newUpgrades };
-        });
+    return {
+        gameState,
+        offlineGains,
+        dailyReward,
+        totalStats,
+        handlers: {
+            handleUpgrade,
+            useSkill,
+            equipItem,
+            unequipItem,
+            dismantleItem,
+            sellItem,
+            upgradeItem,
+            handlePrestige,
+            handlePrestigeUpgrade,
+            handlePassiveSkillUpgrade,
+            handleActivatePet,
+            handleLevelUpPet,
+            handleClaimDailyReward,
+            handleToggleMusic,
+            handleToggleSfx,
+        }
     };
-    
+};
+
+
+// --- Componente Principal de la App ---
+export default function App() {
+    const [isAudioReady, setIsAudioReady] = useState(false);
+    const [activeTab, setActiveTab] = useState('upgrades');
+
+    const {
+        gameState,
+        offlineGains,
+        dailyReward,
+        totalStats,
+        handlers
+    } = useGameLogic(useAudioManager(gameState.settings));
+
+    const handleStartGame = async () => {
+        if (typeof window.Tone !== 'undefined') {
+            await window.Tone.start();
+            setIsAudioReady(true);
+        } else {
+            alert("La librería de audio no pudo cargar. El juego funcionará sin sonido.");
+            setIsAudioReady(true);
+        }
+    };
+
     const animations = `
-        @keyframes floatUp {
-            from { opacity: 1; transform: translateY(0); }
-            to { opacity: 0; transform: translateY(-50px); }
-        }
+        @keyframes floatUp { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-50px); } }
         .floating-text { animation: floatUp 1s ease-out forwards; }
-
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            25% { transform: translateX(-5px) rotate(-2deg); }
-            75% { transform: translateX(5px) rotate(2deg); }
-        }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px) rotate(-2deg); } 75% { transform: translateX(5px) rotate(2deg); } }
         .shake { animation: shake 0.2s ease-in-out; }
-
-        @keyframes fadeOut {
-            from { opacity: 1; transform: scale(1); }
-            to { opacity: 0; transform: scale(0.5); }
-        }
+        @keyframes fadeOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.5); } }
         .fadeOut { animation: fadeOut 0.5s ease-out forwards; }
     `;
 
@@ -1262,7 +1286,7 @@ export default function App() {
             <style>{animations}</style>
 
             {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={() => setOfflineGains(null)} />}
-            {dailyReward && <DailyRewardModal reward={dailyReward} onClose={handleClaimDailyReward} />}
+            {dailyReward && <DailyRewardModal reward={dailyReward} onClose={handlers.handleClaimDailyReward} />}
 
             {gameState.floatingTexts.map(ft => (
                 <FloatingText key={ft.id} {...ft} />
@@ -1274,9 +1298,9 @@ export default function App() {
                     {/* Columna Izquierda */}
                     <div className="flex flex-col gap-6">
                        <HeroPanel hero={{...gameState.hero, petLevel}} stats={totalStats} prestige={gameState.prestige} activePet={activePet} />
-                       <SettingsPanel settings={gameState.settings} onToggleMusic={handleToggleMusic} onToggleSfx={handleToggleSfx} />
-                       <PetPanel pets={gameState.pets} gold={gameState.hero.gold} onActivate={handleActivatePet} onLevelUp={handleLevelUpPet} />
-                       <SkillsPanel skills={gameState.skills} onUseSkill={useSkill} />
+                       <SettingsPanel settings={gameState.settings} onToggleMusic={handlers.handleToggleMusic} onToggleSfx={handlers.handleToggleSfx} />
+                       <PetPanel pets={gameState.pets} gold={gameState.hero.gold} onActivate={handlers.handleActivatePet} onLevelUp={handlers.handleLevelUpPet} />
+                       <SkillsPanel skills={gameState.skills} onUseSkill={handlers.useSkill} />
                     </div>
                     {/* Columna Central */}
                     <div className="flex flex-col gap-6">
@@ -1291,10 +1315,10 @@ export default function App() {
                        <InventoryPanel 
                             equipment={gameState.hero.equipment} 
                             inventory={gameState.inventory} 
-                            onEquip={equipItem}
-                            onUnequip={unequipItem}
-                            onDismantle={dismantleItem}
-                            onSell={sellItem}
+                            onEquip={handlers.equipItem}
+                            onUnequip={handlers.unequipItem}
+                            onDismantle={handlers.dismantleItem}
+                            onSell={handlers.sellItem}
                         />
                     </div>
                     {/* Columna Derecha */}
@@ -1306,20 +1330,20 @@ export default function App() {
                             <TabButton tabName="crafting">Forja</TabButton>
                         </div>
 
-                        {activeTab === 'upgrades' && <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />}
+                        {activeTab === 'upgrades' && <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handlers.handleUpgrade} />}
                         {activeTab === 'prestige' && <PrestigeUpgradesPanel 
                             relics={gameState.prestige.relics}
                             upgrades={gameState.prestigeUpgrades}
-                            onUpgrade={handlePrestigeUpgrade}
+                            onUpgrade={handlers.handlePrestigeUpgrade}
                         />}
                         {activeTab === 'passives' && <PassiveSkillsPanel
                             skillPoints={gameState.hero.skillPoints}
                             skills={gameState.passiveSkills}
-                            onUpgrade={handlePassiveSkillUpgrade}
+                            onUpgrade={handlers.handlePassiveSkillUpgrade}
                         />}
                         {activeTab === 'crafting' && <CraftingPanel
                             hero={gameState.hero}
-                            onUpgradeItem={upgradeItem}
+                            onUpgradeItem={handlers.upgradeItem}
                         />}
                     </div>
                 </div>
