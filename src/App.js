@@ -1068,6 +1068,11 @@ const useGameLogic = (audioManager) => {
             return { ...prev, hero: newHero, upgrades: newUpgrades };
         });
     };
+    
+    // CORRECCIÓN: Handler para cerrar el modal de ganancias offline
+    const clearOfflineGains = useCallback(() => {
+        setOfflineGains(null);
+    }, []);
 
     useEffect(() => {
         const gameInterval = setInterval(() => {
@@ -1218,6 +1223,7 @@ const useGameLogic = (audioManager) => {
             handleClaimDailyReward,
             handleToggleMusic,
             handleToggleSfx,
+            clearOfflineGains,
         }
     };
 };
@@ -1285,7 +1291,7 @@ export default function App() {
         <div className="bg-gray-900 text-white flex items-center justify-center min-h-screen font-sans">
             <style>{animations}</style>
 
-            {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={() => setOfflineGains(null)} />}
+            {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={handlers.clearOfflineGains} />}
             {dailyReward && <DailyRewardModal reward={dailyReward} onClose={handlers.handleClaimDailyReward} />}
 
             {gameState.floatingTexts.map(ft => (
