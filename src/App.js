@@ -20,6 +20,7 @@ const initialHeroState = {
     maxHp: 100,
     damage: 10,
     critChance: 0.05,
+    critMultiplier: 1.5, // CORREGIDO: Faltaba esta propiedad
     gold: 0,
     xp: 0,
     xpNeeded: 100,
@@ -31,7 +32,7 @@ const initialHeroState = {
 };
 
 const initialGameState = {
-    hero: initialHeroState,
+    hero: { ...initialHeroState },
     inventory: [],
     monster: {
         name: "Orco Débil",
@@ -272,7 +273,6 @@ const PrestigeUpgradesPanel = ({ relics, upgrades, onUpgrade }) => (
     </div>
 );
 
-// NUEVO: Modal para mostrar las ganancias offline
 const OfflineGainsModal = ({ gains, onClose }) => {
     const formatTime = (seconds) => {
         const h = Math.floor(seconds / 3600);
@@ -297,7 +297,6 @@ const OfflineGainsModal = ({ gains, onClose }) => {
     );
 };
 
-
 const FloatingText = ({ text, x, y, color, id }) => {
     const style = {
         left: `${x}px`,
@@ -314,7 +313,6 @@ const FloatingText = ({ text, x, y, color, id }) => {
 // --- Componente Principal de la App ---
 export default function App() {
     const [gameState, setGameState] = useState(initialGameState);
-    // NUEVO: Estado para el modal de ganancias offline
     const [offlineGains, setOfflineGains] = useState(null);
 
     const totalStats = useMemo(() => {
@@ -509,7 +507,7 @@ export default function App() {
                     xpNeeded: newXpNeeded,
                     maxHp: newMaxHp,
                     damage: newDamage,
-                    hp: newMaxHp, // Cura al máximo al subir de nivel
+                    hp: totalStats.maxHp, 
                 };
             }
             return newState;
@@ -583,7 +581,7 @@ export default function App() {
 
             return {
                 ...prev,
-                hero: { ...initialHeroState, critMultiplier: prev.hero.critMultiplier },
+                hero: { ...initialHeroState },
                 inventory: [],
                 upgrades: initialGameState.upgrades,
                 stage: 1,
@@ -618,7 +616,6 @@ export default function App() {
         });
     }, []);
 
-    // Bucle de ataque
     useEffect(() => {
         const gameInterval = setInterval(() => {
             if (!gameState.isBossFight || gameState.bossTimer > 0) {
@@ -628,7 +625,6 @@ export default function App() {
         return () => clearInterval(gameInterval);
     }, [heroAttack, gameState.isBossFight, gameState.bossTimer]);
     
-    // Bucle de enfriamientos
     useEffect(() => {
         const cooldownInterval = setInterval(() => {
             setGameState(prev => {
@@ -646,7 +642,6 @@ export default function App() {
         return () => clearInterval(cooldownInterval);
     }, []);
 
-    // Lógica de aparición de monstruos
     useEffect(() => {
         if (gameState.monster.hp <= 0) {
             const timeout = setTimeout(() => {
@@ -662,7 +657,6 @@ export default function App() {
         }
     }, [gameState.monster.hp, gameState.monstersKilledInStage, gameState.monstersPerStage, gameState.isBossFight, spawnNewMonster, spawnBoss]);
     
-    // Temporizador del jefe
     useEffect(() => {
         if (!gameState.isBossFight) return;
 
@@ -681,7 +675,6 @@ export default function App() {
         return () => clearInterval(timerInterval);
     }, [gameState.isBossFight, addLogMessage]);
 
-    // NUEVO: Cargar y calcular ganancias offline
     useEffect(() => {
         const savedStateJSON = localStorage.getItem('idleRpgGameState');
         const lastSaveTime = localStorage.getItem('idleRpgLastSave');
@@ -691,12 +684,12 @@ export default function App() {
             const currentTime = Date.now();
             const offlineSeconds = Math.floor((currentTime - parseInt(lastSaveTime, 10)) / 1000);
 
-            if (offlineSeconds > 10) { // Solo calcular si ha pasado un tiempo considerable
+            if (offlineSeconds > 10) { 
                 const goldBonus = 1 + (loadedState.prestigeUpgrades.goldBonus.level * loadedState.prestigeUpgrades.goldBonus.increase);
                 const avgGoldPerKill = Math.round(5 * (1 + (loadedState.stage - 1) * 0.2) * goldBonus);
                 const avgXpPerKill = Math.round(10 * (1 + (loadedState.stage - 1) * 0.2));
-                const killsPerSecond = 1 / 4; // Promedio de 1 muerte cada 4 segundos
-                const offlineRate = 0.25; // 25% de eficiencia offline
+                const killsPerSecond = 1 / 4; 
+                const offlineRate = 0.25; 
 
                 const goldGained = Math.floor(offlineSeconds * killsPerSecond * avgGoldPerKill * offlineRate);
                 let xpGained = Math.floor(offlineSeconds * killsPerSecond * avgXpPerKill * offlineRate);
@@ -714,20 +707,19 @@ export default function App() {
                     loadedState.hero.damage += 5;
                 }
                 loadedState.hero.xp = currentXp;
-                loadedState.hero.hp = loadedState.hero.maxHp; // Curar al volver
+                loadedState.hero.hp = loadedState.hero.maxHp;
 
                 setOfflineGains({ gold: goldGained, xp: xpGained, time: offlineSeconds, levels: levelsGained });
             }
             setGameState(loadedState);
         }
-    }, []); // Se ejecuta solo una vez al cargar
+    }, []);
 
-    // NUEVO: Guardar el juego periódicamente
     useEffect(() => {
         const saveInterval = setInterval(() => {
             localStorage.setItem('idleRpgGameState', JSON.stringify(gameState));
             localStorage.setItem('idleRpgLastSave', Date.now().toString());
-        }, 5000); // Guardar cada 5 segundos
+        }, 5000);
 
         return () => clearInterval(saveInterval);
     }, [gameState]);
@@ -776,12 +768,16 @@ export default function App() {
 
             <div className="container mx-auto p-4 max-w-7xl w-full">
                 <h1 className="text-4xl font-bold text-center mb-6 text-yellow-400">Aventura Idle con React</h1>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                {/* CORREGIDO: Layout de cuadrícula principal simplificado */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Columna Izquierda */}
                     <div className="flex flex-col gap-6">
                        <HeroPanel hero={gameState.hero} stats={totalStats} prestige={gameState.prestige} />
                        <SkillsPanel skills={gameState.skills} onUseSkill={useSkill} />
+                       <PrestigePanel hero={gameState.hero} prestige={gameState.prestige} onPrestige={handlePrestige} />
                     </div>
-                    <div className="md:col-span-2">
+                    {/* Columna Central */}
+                    <div className="flex flex-col gap-6">
                        <CombatPanel 
                            monster={gameState.monster} 
                            stage={gameState.stage} 
@@ -789,24 +785,22 @@ export default function App() {
                            isBossFight={gameState.isBossFight}
                            bossTimer={gameState.bossTimer}
                        />
+                       <InventoryPanel 
+                            equipment={gameState.hero.equipment} 
+                            inventory={gameState.inventory} 
+                            onEquip={equipItem}
+                            onUnequip={unequipItem}
+                        />
                     </div>
+                    {/* Columna Derecha */}
                     <div className="flex flex-col gap-6">
-                        <UpgradesPanel gold={gameState.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
-                        <PrestigePanel hero={gameState.hero} prestige={gameState.prestige} onPrestige={handlePrestige} />
+                        <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
+                        <PrestigeUpgradesPanel 
+                            relics={gameState.prestige.relics}
+                            upgrades={gameState.prestigeUpgrades}
+                            onUpgrade={handlePrestigeUpgrade}
+                        />
                     </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
-                    <InventoryPanel 
-                        equipment={gameState.hero.equipment} 
-                        inventory={gameState.inventory} 
-                        onEquip={equipItem}
-                        onUnequip={unequipItem}
-                    />
-                    <PrestigeUpgradesPanel 
-                        relics={gameState.prestige.relics}
-                        upgrades={gameState.prestigeUpgrades}
-                        onUpgrade={handlePrestigeUpgrade}
-                    />
                 </div>
             </div>
         </div>
