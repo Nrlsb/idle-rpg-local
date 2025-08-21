@@ -2,15 +2,21 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
 // --- Constantes del Juego ---
 const ITEM_RARITIES = {
-    common: { name: 'Común', color: 'text-gray-300', multiplier: 1 },
-    rare: { name: 'Raro', color: 'text-blue-400', multiplier: 1.5 },
-    epic: { name: 'Épico', color: 'text-purple-500', multiplier: 2.5 },
+    common: { name: 'Común', color: 'text-gray-300', multiplier: 1, dismantle: { scrap: 1 } },
+    rare: { name: 'Raro', color: 'text-blue-400', multiplier: 1.5, dismantle: { scrap: 3, essence: 1 } },
+    epic: { name: 'Épico', color: 'text-purple-500', multiplier: 2.5, dismantle: { scrap: 5, essence: 3 } },
 };
 
 const ITEM_TEMPLATES = {
     weapon: { name: 'Espada', icon: '⚔️', stat: 'damage', baseValue: 2 },
     shield: { name: 'Escudo', icon: '🛡️', stat: 'maxHp', baseValue: 10 },
     amulet: { name: 'Amuleto', icon: '💎', stat: 'critChance', baseValue: 0.01 },
+};
+
+// --- NUEVAS CONSTANTES DE MATERIALES ---
+const MATERIALS = {
+    scrap: { name: 'Fragmentos de Chatarra', icon: '⚙️' },
+    essence: { name: 'Esencia Mágica', icon: '✨' },
 };
 
 // --- Estado Inicial del Juego ---
@@ -25,6 +31,10 @@ const initialHeroState = {
     xp: 0,
     xpNeeded: 100,
     skillPoints: 0,
+    materials: { // NUEVO: Materiales del jugador
+        scrap: 0,
+        essence: 0,
+    },
     equipment: {
         weapon: null,
         shield: null,
@@ -80,7 +90,7 @@ const initialGameState = {
         goldBonus: { name: 'Bendición Dorada', level: 0, cost: 1, increase: 0.1, description: '+10% Oro por nivel' },
         damageBonus: { name: 'Fuerza Ancestral', level: 0, cost: 1, increase: 0.05, description: '+5% Daño por nivel' },
     },
-    monsterAnimation: '', // NUEVO: Estado para animación del monstruo
+    monsterAnimation: '',
 };
 
 // --- Componentes de la UI ---
@@ -124,7 +134,6 @@ const CombatPanel = ({ monster, stage, combatLog, isBossFight, bossTimer, monste
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col items-center justify-between h-full">
             <div>
                 <h2 className={`text-2xl font-bold text-center ${isBossFight ? 'text-yellow-400 animate-pulse' : 'text-red-400'}`}>{monster.name}</h2>
-                {/* NUEVO: Se aplica la clase de animación */}
                 <div id="monster-art-container" className={`text-6xl text-center my-4 relative ${isBossFight ? 'transform scale-125' : ''} ${monsterAnimation}`}>{monster.art}</div>
                 <div className="relative">
                     <div className="w-full bg-gray-700 rounded-full h-6">
@@ -214,32 +223,38 @@ const SkillsPanel = ({ skills, onUseSkill }) => (
     </div>
 );
 
-const ItemCard = ({ item, onClick, buttonText }) => {
+const ItemCard = ({ item, onEquip, onUnequip, onDismantle, isEquipped }) => {
     if (!item) {
-        return <div className="bg-gray-700 p-2 rounded-lg text-center text-gray-400 h-24 flex items-center justify-center">Vacío</div>;
+        return <div className="bg-gray-700 p-2 rounded-lg text-center text-gray-400 h-full flex items-center justify-center">Vacío</div>;
     }
     const rarity = ITEM_RARITIES[item.rarity];
     return (
-        <div className={`bg-gray-700 p-2 rounded-lg border ${rarity.color.replace('text-', 'border-').slice(0, -4)}-500`}>
-            <p className={`font-bold ${rarity.color}`}>{item.icon} {item.name}</p>
-            <p className="text-sm">+ {item.stat === 'critChance' ? (item.value * 100).toFixed(1) + '%' : item.value.toFixed(0)} {item.stat === 'maxHp' ? 'HP' : item.stat === 'damage' ? 'Daño' : 'Crit'}</p>
-            {onClick && <button onClick={onClick} className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-xs py-1 rounded">{buttonText}</button>}
+        <div className={`bg-gray-700 p-2 rounded-lg border ${rarity.color.replace('text-', 'border-').slice(0, -4)}-500 flex flex-col justify-between`}>
+            <div>
+                <p className={`font-bold ${rarity.color}`}>{item.icon} {item.name} {item.upgradeLevel > 0 && `+${item.upgradeLevel}`}</p>
+                <p className="text-sm">+ {item.stat === 'critChance' ? (item.value * 100).toFixed(1) + '%' : item.value.toFixed(0)} {item.stat === 'maxHp' ? 'HP' : item.stat === 'damage' ? 'Daño' : 'Crit'}</p>
+            </div>
+            <div className="flex gap-1 mt-2">
+                {onEquip && <button onClick={onEquip} className="w-full bg-blue-600 hover:bg-blue-700 text-xs py-1 rounded">Equipar</button>}
+                {onUnequip && <button onClick={onUnequip} className="w-full bg-gray-600 hover:bg-gray-700 text-xs py-1 rounded">Quitar</button>}
+                {onDismantle && <button onClick={onDismantle} className="w-full bg-red-600 hover:bg-red-700 text-xs py-1 rounded">Desmantelar</button>}
+            </div>
         </div>
     );
 };
 
-const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip }) => (
+const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip, onDismantle }) => (
     <div className="bg-gray-800 p-6 rounded-lg shadow-lg h-full">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Equipamiento</h2>
         <div className="grid grid-cols-3 gap-4 mb-4">
-            <ItemCard item={equipment.weapon} onClick={equipment.weapon ? () => onUnequip('weapon') : null} buttonText="Quitar" />
-            <ItemCard item={equipment.shield} onClick={equipment.shield ? () => onUnequip('shield') : null} buttonText="Quitar" />
-            <ItemCard item={equipment.amulet} onClick={equipment.amulet ? () => onUnequip('amulet') : null} buttonText="Quitar" />
+            <ItemCard item={equipment.weapon} onUnequip={equipment.weapon ? () => onUnequip('weapon') : null} isEquipped={true} />
+            <ItemCard item={equipment.shield} onUnequip={equipment.shield ? () => onUnequip('shield') : null} isEquipped={true} />
+            <ItemCard item={equipment.amulet} onUnequip={equipment.amulet ? () => onUnequip('amulet') : null} isEquipped={true} />
         </div>
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Inventario ({inventory.length})</h2>
         <div className="grid grid-cols-4 gap-2 h-48 overflow-y-auto">
             {inventory.map(item => (
-                <ItemCard key={item.id} item={item} onClick={() => onEquip(item.id)} buttonText="Equipar" />
+                <ItemCard key={item.id} item={item} onEquip={() => onEquip(item.id)} onDismantle={() => onDismantle(item.id)} />
             ))}
         </div>
     </div>
@@ -303,6 +318,56 @@ const PassiveSkillsPanel = ({ skillPoints, skills, onUpgrade }) => (
         </div>
     </div>
 );
+
+// --- NUEVO PANEL: Forja ---
+const CraftingPanel = ({ hero, onUpgradeItem }) => {
+    const getUpgradeCost = (item) => {
+        if (!item) return null;
+        const level = item.upgradeLevel || 0;
+        return {
+            gold: 100 * (level + 1),
+            scrap: 5 * (level + 1),
+            essence: item.rarity === 'common' ? 0 : 1 * (level + 1),
+        };
+    };
+
+    return (
+        <div className="bg-gray-800 p-6 rounded-lg shadow-lg h-full">
+            <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Forja</h2>
+            <div className="mb-4">
+                <h3 className="text-lg font-semibold mb-2">Materiales</h3>
+                <div className="flex justify-around bg-gray-700 p-2 rounded-lg">
+                    <p>{MATERIALS.scrap.icon} {MATERIALS.scrap.name}: {hero.materials.scrap}</p>
+                    <p>{MATERIALS.essence.icon} {MATERIALS.essence.name}: {hero.materials.essence}</p>
+                </div>
+            </div>
+            <div className="space-y-4">
+                {Object.entries(hero.equipment).map(([slot, item]) => {
+                    if (!item) return <div key={slot} className="bg-gray-700 p-4 rounded-lg text-center text-gray-400">Espacio de {slot} vacío</div>;
+                    
+                    const cost = getUpgradeCost(item);
+                    const canAfford = hero.gold >= cost.gold && hero.materials.scrap >= cost.scrap && hero.materials.essence >= cost.essence;
+
+                    return (
+                        <div key={slot} className="bg-gray-700 p-4 rounded-lg">
+                            <p className="font-bold">{item.icon} {item.name} +{item.upgradeLevel}</p>
+                            <button 
+                                onClick={() => onUpgradeItem(slot)}
+                                disabled={!canAfford}
+                                className="w-full mt-2 bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded transition duration-300 disabled:bg-gray-500"
+                            >
+                                Mejorar
+                            </button>
+                            <p className="text-xs text-center mt-1">
+                                Costo: {cost.gold} Oro, {cost.scrap} {MATERIALS.scrap.icon}, {cost.essence} {MATERIALS.essence.icon}
+                            </p>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
 
 
 const OfflineGainsModal = ({ gains, onClose }) => {
@@ -397,36 +462,21 @@ export default function App() {
         }, 1000);
     }, []);
 
-    const generateLoot = useCallback((stage, isBoss = false) => {
-        const dropChance = isBoss ? 0.8 : 0.2;
+    const generateMaterialDrop = useCallback((stage, isBoss = false) => {
+        const dropChance = isBoss ? 1.0 : 0.7;
         if (Math.random() > dropChance) return null;
 
-        const rarityRoll = Math.random();
-        let rarity;
-        if (isBoss) {
-            if (rarityRoll < 0.2) rarity = 'epic';
-            else if (rarityRoll < 0.6) rarity = 'rare';
-            else rarity = 'common';
-        } else {
-            if (rarityRoll < 0.05) rarity = 'epic';
-            else if (rarityRoll < 0.25) rarity = 'rare';
-            else rarity = 'common';
+        const drops = {};
+        const scrapAmount = isBoss ? 5 + Math.floor(stage / 2) : 1 + Math.floor(Math.random() * 2);
+        drops.scrap = scrapAmount;
+        
+        const essenceChance = isBoss ? 0.8 : 0.1;
+        if (Math.random() < essenceChance) {
+            const essenceAmount = isBoss ? 2 + Math.floor(stage / 5) : 1;
+            drops.essence = essenceAmount;
         }
 
-        const itemTypes = Object.keys(ITEM_TEMPLATES);
-        const itemTypeKey = itemTypes[Math.floor(Math.random() * itemTypes.length)];
-        const template = ITEM_TEMPLATES[itemTypeKey];
-        const value = template.baseValue * ITEM_RARITIES[rarity].multiplier * (1 + (stage - 1) * 0.1);
-
-        return {
-            id: Date.now() + Math.random(),
-            name: `${template.name} ${ITEM_RARITIES[rarity].name}`,
-            icon: template.icon,
-            type: itemTypeKey,
-            stat: template.stat,
-            value: value,
-            rarity: rarity,
-        };
+        return drops;
     }, []);
 
     const spawnBoss = useCallback(() => {
@@ -485,7 +535,6 @@ export default function App() {
                 createFloatingText(damageDealt.toFixed(0), 'white');
             }
             
-            // NUEVO: Activar animación de golpe
             const newStateWithAnimation = { ...prev, monsterAnimation: 'shake' };
             setTimeout(() => setGameState(p => ({ ...p, monsterAnimation: '' })), 200);
 
@@ -498,7 +547,6 @@ export default function App() {
             };
 
             if (newMonsterHp <= 0) {
-                 // NUEVO: Activar animación de muerte
                 newState.monsterAnimation = 'fadeOut';
 
                 if (prev.isBossFight) {
@@ -523,10 +571,18 @@ export default function App() {
 
                 addLogMessage(`+${goldGained} Oro, +${prev.monster.xpReward} XP`, 'text-yellow-300');
                 
-                const loot = generateLoot(newState.stage, prev.isBossFight);
-                if (loot) {
-                    newState.inventory = [...newState.inventory, loot];
-                    addLogMessage(`¡Has encontrado ${loot.name}!`, ITEM_RARITIES[loot.rarity].color);
+                // NUEVO: Generar drop de materiales
+                const materialDrops = generateMaterialDrop(newState.stage, prev.isBossFight);
+                if (materialDrops) {
+                    let dropMessage = 'Materiales encontrados: ';
+                    let first = true;
+                    for(const mat in materialDrops) {
+                        if (!first) dropMessage += ', ';
+                        newState.hero.materials[mat] = (newState.hero.materials[mat] || 0) + materialDrops[mat];
+                        dropMessage += `${materialDrops[mat]} ${MATERIALS[mat].icon}`;
+                        first = false;
+                    }
+                    addLogMessage(dropMessage, 'text-cyan-400');
                 }
 
                 newState.hero.gold += goldGained;
@@ -560,7 +616,7 @@ export default function App() {
             }
             return newState;
         });
-    }, [addLogMessage, createFloatingText, generateLoot, totalStats]);
+    }, [addLogMessage, createFloatingText, generateMaterialDrop, totalStats]);
     
     const useSkill = useCallback((skillId) => {
         setGameState(prev => {
@@ -623,6 +679,71 @@ export default function App() {
         });
     }, []);
 
+    const dismantleItem = useCallback((itemId) => {
+        setGameState(prev => {
+            const itemToDismantle = prev.inventory.find(item => item.id === itemId);
+            if (!itemToDismantle) return prev;
+            
+            const newInventory = prev.inventory.filter(item => item.id !== itemId);
+            const materialsGained = ITEM_RARITIES[itemToDismantle.rarity].dismantle;
+            const newMaterials = { ...prev.hero.materials };
+
+            let logMsg = "Desmantelado: ";
+            let first = true;
+            for (const mat in materialsGained) {
+                if(!first) logMsg += ", ";
+                newMaterials[mat] += materialsGained[mat];
+                logMsg += `+${materialsGained[mat]} ${MATERIALS[mat].icon}`;
+                first = false;
+            }
+            addLogMessage(logMsg, 'text-gray-400');
+
+            return { ...prev, inventory: newInventory, hero: { ...prev.hero, materials: newMaterials }};
+        });
+    }, [addLogMessage]);
+
+    const upgradeItem = useCallback((slot) => {
+        setGameState(prev => {
+            const item = prev.hero.equipment[slot];
+            if (!item) return prev;
+
+            const level = item.upgradeLevel || 0;
+            const cost = {
+                gold: 100 * (level + 1),
+                scrap: 5 * (level + 1),
+                essence: item.rarity === 'common' ? 0 : 1 * (level + 1),
+            };
+            
+            if (prev.hero.gold < cost.gold || prev.hero.materials.scrap < cost.scrap || prev.hero.materials.essence < cost.essence) {
+                return prev;
+            }
+
+            const newHero = {
+                ...prev.hero,
+                gold: prev.hero.gold - cost.gold,
+                materials: {
+                    scrap: prev.hero.materials.scrap - cost.scrap,
+                    essence: prev.hero.materials.essence - cost.essence,
+                }
+            };
+
+            const template = ITEM_TEMPLATES[item.type];
+            const statIncrease = template.baseValue * ITEM_RARITIES[item.rarity].multiplier * 0.1; // 10% del valor base por nivel
+
+            const upgradedItem = {
+                ...item,
+                upgradeLevel: level + 1,
+                value: item.value + statIncrease,
+            };
+
+            const newEquipment = { ...prev.hero.equipment, [slot]: upgradedItem };
+
+            addLogMessage(`¡${item.name} mejorado a +${upgradedItem.upgradeLevel}!`, 'text-orange-400');
+
+            return { ...prev, hero: { ...newHero, equipment: newEquipment }};
+        });
+    }, [addLogMessage]);
+
     const handlePrestige = useCallback(() => {
         setGameState(prev => {
             if (prev.hero.level < prev.prestige.nextLevelReq) return prev;
@@ -632,7 +753,7 @@ export default function App() {
 
             return {
                 ...prev,
-                hero: { ...initialHeroState, skillPoints: prev.hero.skillPoints },
+                hero: { ...initialHeroState, skillPoints: prev.hero.skillPoints, materials: prev.hero.materials },
                 inventory: [],
                 upgrades: initialGameState.upgrades,
                 stage: 1,
@@ -723,7 +844,7 @@ export default function App() {
                 } else {
                     spawnNewMonster();
                 }
-            }, 1000); // Aumentado para dar tiempo a la animación de muerte
+            }, 1000);
             return () => clearTimeout(timeout);
         }
     }, [gameState.monster.hp, gameState.monstersKilledInStage, gameState.monstersPerStage, gameState.isBossFight, spawnNewMonster, spawnBoss]);
@@ -834,7 +955,6 @@ export default function App() {
         });
     };
     
-    // NUEVO: Definiciones de animaciones
     const animations = `
         @keyframes floatUp {
             from { opacity: 1; transform: translateY(0); }
@@ -899,6 +1019,7 @@ export default function App() {
                             inventory={gameState.inventory} 
                             onEquip={equipItem}
                             onUnequip={unequipItem}
+                            onDismantle={dismantleItem}
                         />
                     </div>
                     {/* Columna Derecha */}
@@ -907,6 +1028,7 @@ export default function App() {
                             <TabButton tabName="upgrades">Mejoras</TabButton>
                             <TabButton tabName="prestige">Reliquias</TabButton>
                             <TabButton tabName="passives">Pasivas</TabButton>
+                            <TabButton tabName="crafting">Forja</TabButton>
                         </div>
 
                         {activeTab === 'upgrades' && <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />}
@@ -919,6 +1041,10 @@ export default function App() {
                             skillPoints={gameState.hero.skillPoints}
                             skills={gameState.passiveSkills}
                             onUpgrade={handlePassiveSkillUpgrade}
+                        />}
+                        {activeTab === 'crafting' && <CraftingPanel
+                            hero={gameState.hero}
+                            onUpgradeItem={upgradeItem}
                         />}
                     </div>
                 </div>
