@@ -1330,6 +1330,7 @@ const useGameLogic = (audioManager) => {
                 ...initialGameState,
                 ...loadedState,
                 hero: { ...initialGameState.hero, ...loadedState.hero },
+                monster: { ...initialGameState.monster, ...loadedState.monster }, // CORRECCIÓN
                 prestige: { ...initialGameState.prestige, ...loadedState.prestige },
                 prestigeUpgrades: { ...initialGameState.prestigeUpgrades, ...loadedState.prestigeUpgrades },
                 passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills },
