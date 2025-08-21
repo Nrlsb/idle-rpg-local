@@ -14,7 +14,6 @@ const ITEM_TEMPLATES = {
 };
 
 // --- Estado Inicial del Juego ---
-// Se ha dividido el estado inicial para poder reiniciarlo fácilmente con el prestigio.
 const initialHeroState = {
     level: 1,
     hp: 100,
@@ -65,7 +64,6 @@ const initialGameState = {
     floatingTexts: [],
     isBossFight: false,
     bossTimer: 30,
-    // NUEVO: Estado para el Prestigio
     prestige: {
         level: 0,
         relics: 0,
@@ -237,7 +235,6 @@ const InventoryPanel = ({ equipment, inventory, onEquip, onUnequip }) => (
     </div>
 );
 
-// NUEVO: Panel de Prestigio
 const PrestigePanel = ({ hero, prestige, onPrestige }) => (
     <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Prestigio</h2>
@@ -253,7 +250,6 @@ const PrestigePanel = ({ hero, prestige, onPrestige }) => (
     </div>
 );
 
-// NUEVO: Panel de Mejoras de Prestigio
 const PrestigeUpgradesPanel = ({ relics, upgrades, onUpgrade }) => (
      <div className="bg-gray-800 p-6 rounded-lg shadow-lg h-full">
         <h2 className="text-2xl font-semibold mb-4 text-center border-b border-gray-700 pb-2">Mejoras de Reliquia</h2>
@@ -276,6 +272,31 @@ const PrestigeUpgradesPanel = ({ relics, upgrades, onUpgrade }) => (
     </div>
 );
 
+// NUEVO: Modal para mostrar las ganancias offline
+const OfflineGainsModal = ({ gains, onClose }) => {
+    const formatTime = (seconds) => {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        return `${h}h ${m}m ${s}s`;
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div className="bg-gray-800 p-8 rounded-lg shadow-2xl max-w-sm w-full text-center">
+                <h2 className="text-2xl font-bold mb-4 text-yellow-400">¡Bienvenido de vuelta!</h2>
+                <p className="mb-2">Mientras estabas fuera ({formatTime(gains.time)}), tu héroe ha conseguido:</p>
+                <p className="text-xl font-semibold text-yellow-300">{gains.gold} Oro</p>
+                <p className="text-xl font-semibold text-blue-400">{gains.xp} XP</p>
+                {gains.levels > 0 && <p className="text-lg mt-2 text-green-400">¡Y subió {gains.levels} nivel(es)!</p>}
+                <button onClick={onClose} className="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg">
+                    Recoger
+                </button>
+            </div>
+        </div>
+    );
+};
+
 
 const FloatingText = ({ text, x, y, color, id }) => {
     const style = {
@@ -293,6 +314,8 @@ const FloatingText = ({ text, x, y, color, id }) => {
 // --- Componente Principal de la App ---
 export default function App() {
     const [gameState, setGameState] = useState(initialGameState);
+    // NUEVO: Estado para el modal de ganancias offline
+    const [offlineGains, setOfflineGains] = useState(null);
 
     const totalStats = useMemo(() => {
         const prestigeDamageBonus = 1 + (gameState.prestigeUpgrades.damageBonus.level * gameState.prestigeUpgrades.damageBonus.increase);
@@ -446,7 +469,6 @@ export default function App() {
 
                 addLogMessage(`${prev.monster.name} ha sido derrotado!`, 'text-red-500');
                 
-                // MODIFICADO: Aplicar bonificación de oro por prestigio
                 const goldBonus = 1 + (prev.prestigeUpgrades.goldBonus.level * prev.prestigeUpgrades.goldBonus.increase);
                 let goldGained = Math.round(prev.monster.goldReward * goldBonus);
 
@@ -465,17 +487,30 @@ export default function App() {
                 }
 
                 newState.hero.gold += goldGained;
-                newState.hero.xp += prev.monster.xpReward;
-                
-                if (newState.hero.xp >= newState.hero.xpNeeded) {
-                    newState.hero.level++;
-                    newState.hero.xp -= newState.hero.xpNeeded;
-                    newState.hero.xpNeeded = Math.round(newState.hero.xpNeeded * 1.5);
-                    newState.hero.maxHp += 20;
-                    newState.hero.hp = totalStats.maxHp;
-                    newState.hero.damage += 5;
-                    addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newState.hero.level}.`, 'text-blue-400 font-bold');
+                let newXp = newState.hero.xp + prev.monster.xpReward;
+                let newLevel = newState.hero.level;
+                let newXpNeeded = newState.hero.xpNeeded;
+                let newMaxHp = newState.hero.maxHp;
+                let newDamage = newState.hero.damage;
+
+                while (newXp >= newXpNeeded) {
+                    newLevel++;
+                    newXp -= newXpNeeded;
+                    newXpNeeded = Math.round(newXpNeeded * 1.5);
+                    newMaxHp += 20;
+                    newDamage += 5;
+                    addLogMessage(`¡SUBISTE DE NIVEL! Ahora eres nivel ${newLevel}.`, 'text-blue-400 font-bold');
                 }
+                
+                newState.hero = {
+                    ...newState.hero,
+                    xp: newXp,
+                    level: newLevel,
+                    xpNeeded: newXpNeeded,
+                    maxHp: newMaxHp,
+                    damage: newDamage,
+                    hp: newMaxHp, // Cura al máximo al subir de nivel
+                };
             }
             return newState;
         });
@@ -539,7 +574,6 @@ export default function App() {
         });
     }, []);
 
-    // NUEVO: Función para manejar el prestigio
     const handlePrestige = useCallback(() => {
         setGameState(prev => {
             if (prev.hero.level < prev.prestige.nextLevelReq) return prev;
@@ -565,7 +599,6 @@ export default function App() {
         });
     }, [addLogMessage]);
 
-    // NUEVO: Función para comprar mejoras de prestigio
     const handlePrestigeUpgrade = useCallback((upgradeId) => {
         setGameState(prev => {
             const upgrade = prev.prestigeUpgrades[upgradeId];
@@ -577,7 +610,7 @@ export default function App() {
                 [upgradeId]: {
                     ...upgrade,
                     level: upgrade.level + 1,
-                    cost: upgrade.cost + (upgrade.level + 1), // Aumenta el costo
+                    cost: upgrade.cost + (upgrade.level + 1),
                 }
             };
             
@@ -585,7 +618,7 @@ export default function App() {
         });
     }, []);
 
-
+    // Bucle de ataque
     useEffect(() => {
         const gameInterval = setInterval(() => {
             if (!gameState.isBossFight || gameState.bossTimer > 0) {
@@ -595,6 +628,7 @@ export default function App() {
         return () => clearInterval(gameInterval);
     }, [heroAttack, gameState.isBossFight, gameState.bossTimer]);
     
+    // Bucle de enfriamientos
     useEffect(() => {
         const cooldownInterval = setInterval(() => {
             setGameState(prev => {
@@ -612,6 +646,7 @@ export default function App() {
         return () => clearInterval(cooldownInterval);
     }, []);
 
+    // Lógica de aparición de monstruos
     useEffect(() => {
         if (gameState.monster.hp <= 0) {
             const timeout = setTimeout(() => {
@@ -627,6 +662,7 @@ export default function App() {
         }
     }, [gameState.monster.hp, gameState.monstersKilledInStage, gameState.monstersPerStage, gameState.isBossFight, spawnNewMonster, spawnBoss]);
     
+    // Temporizador del jefe
     useEffect(() => {
         if (!gameState.isBossFight) return;
 
@@ -644,6 +680,57 @@ export default function App() {
 
         return () => clearInterval(timerInterval);
     }, [gameState.isBossFight, addLogMessage]);
+
+    // NUEVO: Cargar y calcular ganancias offline
+    useEffect(() => {
+        const savedStateJSON = localStorage.getItem('idleRpgGameState');
+        const lastSaveTime = localStorage.getItem('idleRpgLastSave');
+
+        if (savedStateJSON && lastSaveTime) {
+            let loadedState = JSON.parse(savedStateJSON);
+            const currentTime = Date.now();
+            const offlineSeconds = Math.floor((currentTime - parseInt(lastSaveTime, 10)) / 1000);
+
+            if (offlineSeconds > 10) { // Solo calcular si ha pasado un tiempo considerable
+                const goldBonus = 1 + (loadedState.prestigeUpgrades.goldBonus.level * loadedState.prestigeUpgrades.goldBonus.increase);
+                const avgGoldPerKill = Math.round(5 * (1 + (loadedState.stage - 1) * 0.2) * goldBonus);
+                const avgXpPerKill = Math.round(10 * (1 + (loadedState.stage - 1) * 0.2));
+                const killsPerSecond = 1 / 4; // Promedio de 1 muerte cada 4 segundos
+                const offlineRate = 0.25; // 25% de eficiencia offline
+
+                const goldGained = Math.floor(offlineSeconds * killsPerSecond * avgGoldPerKill * offlineRate);
+                let xpGained = Math.floor(offlineSeconds * killsPerSecond * avgXpPerKill * offlineRate);
+                
+                loadedState.hero.gold += goldGained;
+                let currentXp = loadedState.hero.xp + xpGained;
+                let levelsGained = 0;
+
+                while (currentXp >= loadedState.hero.xpNeeded) {
+                    currentXp -= loadedState.hero.xpNeeded;
+                    loadedState.hero.level++;
+                    levelsGained++;
+                    loadedState.hero.xpNeeded = Math.round(loadedState.hero.xpNeeded * 1.5);
+                    loadedState.hero.maxHp += 20;
+                    loadedState.hero.damage += 5;
+                }
+                loadedState.hero.xp = currentXp;
+                loadedState.hero.hp = loadedState.hero.maxHp; // Curar al volver
+
+                setOfflineGains({ gold: goldGained, xp: xpGained, time: offlineSeconds, levels: levelsGained });
+            }
+            setGameState(loadedState);
+        }
+    }, []); // Se ejecuta solo una vez al cargar
+
+    // NUEVO: Guardar el juego periódicamente
+    useEffect(() => {
+        const saveInterval = setInterval(() => {
+            localStorage.setItem('idleRpgGameState', JSON.stringify(gameState));
+            localStorage.setItem('idleRpgLastSave', Date.now().toString());
+        }, 5000); // Guardar cada 5 segundos
+
+        return () => clearInterval(saveInterval);
+    }, [gameState]);
 
 
     const handleUpgrade = (upgradeType) => {
@@ -681,6 +768,8 @@ export default function App() {
             <style>{floatUpAnimation}</style>
             <style>{floatingTextStyles}</style>
 
+            {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={() => setOfflineGains(null)} />}
+
             {gameState.floatingTexts.map(ft => (
                 <FloatingText key={ft.id} {...ft} />
             ))}
@@ -702,7 +791,7 @@ export default function App() {
                        />
                     </div>
                     <div className="flex flex-col gap-6">
-                        <UpgradesPanel gold={gameState.hero.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
+                        <UpgradesPanel gold={gameState.gold} upgrades={gameState.upgrades} onUpgrade={handleUpgrade} />
                         <PrestigePanel hero={gameState.hero} prestige={gameState.prestige} onPrestige={handlePrestige} />
                     </div>
                 </div>
