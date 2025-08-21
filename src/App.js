@@ -18,7 +18,6 @@ const MATERIALS = {
     essence: { name: 'Esencia Mágica', icon: '✨' },
 };
 
-// --- NUEVO: Constantes de Compañeros ---
 const PETS = {
     wolf: { id: 'wolf', name: 'Lobo Fiel', icon: '🐺', bonusStat: 'damage', bonusPerLevel: 0.05, description: '+5% de Daño por nivel' },
     golem: { id: 'golem', name: 'Gólem de Oro', icon: '🗿', bonusStat: 'gold', bonusPerLevel: 0.03, description: '+3% de Oro por nivel' },
@@ -74,8 +73,8 @@ const initialGameState = {
         increasedHealth: { name: 'Vitalidad', level: 0, cost: 1, increase: 0.03, description: '+3% Vida Máxima por nivel' },
         fasterCooldowns: { name: 'Presteza', level: 0, cost: 2, increase: 0.01, description: '-1% Enfriamiento de Habilidades por nivel' }
     },
-    pets: { // NUEVO: Estado de Compañeros
-        owned: ['wolf'], // Empieza con el lobo
+    pets: {
+        owned: ['wolf'],
         activePetId: 'wolf',
         levels: {
             wolf: 1,
@@ -106,6 +105,7 @@ const initialGameState = {
         damageBonus: { name: 'Fuerza Ancestral', level: 0, cost: 1, increase: 0.05, description: '+5% Daño por nivel' },
     },
     monsterAnimation: '',
+    lastDailyReward: null, // NUEVO: Para recompensa diaria
 };
 
 // --- Componentes de la UI ---
@@ -385,7 +385,6 @@ const CraftingPanel = ({ hero, onUpgradeItem }) => {
     );
 };
 
-// --- NUEVO PANEL: Compañeros ---
 const PetPanel = ({ pets, gold, onActivate, onLevelUp }) => {
     const getLevelUpCost = (petId) => 100 * Math.pow(pets.levels[petId] || 1, 2);
 
@@ -445,6 +444,25 @@ const OfflineGainsModal = ({ gains, onClose }) => {
     );
 };
 
+// --- NUEVO MODAL: Recompensa Diaria ---
+const DailyRewardModal = ({ reward, onClose }) => (
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div className="bg-gray-800 p-8 rounded-lg shadow-2xl max-w-sm w-full text-center">
+            <h2 className="text-2xl font-bold mb-4 text-yellow-400">🎁 ¡Recompensa Diaria! 🎁</h2>
+            <p className="mb-4">¡Aquí tienes tu recompensa por volver hoy!</p>
+            <div className="space-y-2 text-lg">
+                <p><span className="text-yellow-300">{reward.gold} Oro</span></p>
+                <p><span className="text-cyan-400">{reward.scrap} {MATERIALS.scrap.icon}</span></p>
+                <p><span className="text-purple-400">{reward.essence} {MATERIALS.essence.icon}</span></p>
+            </div>
+            <button onClick={onClose} className="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg">
+                ¡Reclamar!
+            </button>
+        </div>
+    </div>
+);
+
+
 const FloatingText = ({ text, x, y, color, id }) => {
     const style = {
         left: `${x}px`,
@@ -462,6 +480,7 @@ const FloatingText = ({ text, x, y, color, id }) => {
 export default function App() {
     const [gameState, setGameState] = useState(initialGameState);
     const [offlineGains, setOfflineGains] = useState(null);
+    const [dailyReward, setDailyReward] = useState(null); // NUEVO
     const [activeTab, setActiveTab] = useState('upgrades');
 
     const totalStats = useMemo(() => {
@@ -919,6 +938,28 @@ export default function App() {
         });
     }, []);
 
+    // NUEVO: Función para reclamar la recompensa diaria
+    const handleClaimDailyReward = useCallback(() => {
+        if (!dailyReward) return;
+        setGameState(prev => {
+            const newHero = {
+                ...prev.hero,
+                gold: prev.hero.gold + dailyReward.gold,
+                materials: {
+                    scrap: prev.hero.materials.scrap + dailyReward.scrap,
+                    essence: prev.hero.materials.essence + dailyReward.essence,
+                }
+            };
+            addLogMessage(`¡Recompensa diaria reclamada!`, 'text-green-400');
+            return {
+                ...prev,
+                hero: newHero,
+                lastDailyReward: new Date().toISOString().split('T')[0],
+            }
+        });
+        setDailyReward(null);
+    }, [dailyReward, addLogMessage]);
+
 
     useEffect(() => {
         const gameInterval = setInterval(() => {
@@ -995,6 +1036,12 @@ export default function App() {
                 passiveSkills: { ...initialGameState.passiveSkills, ...loadedState.passiveSkills },
                 pets: { ...initialGameState.pets, ...loadedState.pets },
             };
+
+            // Lógica de Recompensa Diaria
+            const today = new Date().toISOString().split('T')[0];
+            if (loadedState.lastDailyReward !== today) {
+                setDailyReward({ gold: 500, scrap: 10, essence: 2 });
+            }
 
 
             if (lastSaveTime) {
@@ -1106,6 +1153,8 @@ export default function App() {
             <style>{animations}</style>
 
             {offlineGains && <OfflineGainsModal gains={offlineGains} onClose={() => setOfflineGains(null)} />}
+            {dailyReward && <DailyRewardModal reward={dailyReward} onClose={handleClaimDailyReward} />}
+
 
             {gameState.floatingTexts.map(ft => (
                 <FloatingText key={ft.id} {...ft} />
